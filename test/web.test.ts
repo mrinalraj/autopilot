@@ -1,0 +1,130 @@
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadConfig } from "../src/config";
+import { Store } from "../src/db";
+import { Autopilot } from "../src/autopilot";
+import { startWeb } from "../src/web";
+import type { LinearClient } from "../src/linear";
+import type { LLM } from "../src/llm";
+
+const dir = mkdtempSync(join(tmpdir(), "autopilot-web-"));
+const port = 47000 + Math.floor(Math.random() * 900);
+const base = `http://localhost:${port}`;
+let server: ReturnType<typeof startWeb>;
+let store: Store;
+
+beforeAll(() => {
+  process.env.AUTOPILOT_NOTIFY = "off";
+  mkdirSync(join(dir, "repos", "backend"), { recursive: true });
+  Bun.spawnSync(["git", "init", "-q", join(dir, "repos", "backend")]);
+  const cfg = { ...loadConfig("/nonexistent"), port, reposRoot: join(dir, "repos"), stateDir: join(dir, "state"), briefsDir: join(dir, "b") };
+  store = new Store(cfg.stateDir);
+  store.upsertIssue({
+    linear_id: "x", identifier: "ENG-9", title: `<script>alert(1)</script>`, url: "https://linear.app/i/ENG-9",
+    brief_path: join(dir, "b", "ENG-9.md"), repo: "backend", repo_path: join(dir, "repos", "backend"), branch: "fix-it-eng-9",
+    confidence: 0.3, resolve_reason: "guess", status: "pending", error: null, worktree_id: null,
+    ticket_json: JSON.stringify({ description: `<img src=x onerror=alert(1)>`, comments: [], team: "ENG", project: null, labels: [], attachments: [], state: "Todo" }),
+    explainer_json: JSON.stringify({ summary: "sum", approach: "app", likely_areas: [], size: "S" }), extra_repos_json: "[]",
+  });
+  const ap = new Autopilot(cfg, store, {} as LinearClient, {} as LLM);
+  server = startWeb(ap);
+});
+
+afterAll(() => {
+  server.stop(true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const csrfFrom = (html: string) => /name="csrf" value="([0-9a-f]+)"/.exec(html)![1];
+
+test("old detail links redirect to the item's modal", async () => {
+  const res = await fetch(`${base}/issues/ENG-9`, { redirect: "manual" });
+  expect(res.status).toBe(303);
+  expect(res.headers.get("location")).toBe("/#m-ENG-9");
+});
+
+test("card + modal escape untrusted text, set CSP and gate low confidence behind review", async () => {
+  const res = await fetch(`${base}/`);
+  const html = await res.text();
+  expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+  expect(html).not.toContain("<script>alert");
+  expect(html).not.toContain("<img src=x");
+  expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+  expect(html).toContain("Low confidence (30%)");
+  expect(html).toContain('<div class="modal" id="m-ENG-9"');
+  expect(html).toContain('<a class="btn primary" href="#m-ENG-9">Review</a>');
+});
+
+test("only the nonce'd live script may run", async () => {
+  const res = await fetch(`${base}/`);
+  const csp = res.headers.get("content-security-policy")!;
+  const nonce = /script-src 'nonce-([^']+)'/.exec(csp)![1];
+  const html = await res.text();
+  expect(html.match(/<script/g)).toHaveLength(1);
+  expect(html).toContain(`<script nonce="${nonce}">`);
+  expect(csp).not.toContain("unsafe-inline'; script");
+});
+
+test("serves the PWA manifest, service worker, offline page and icons", async () => {
+  const m = await fetch(`${base}/manifest.webmanifest`);
+  expect(m.headers.get("content-type")).toBe("application/manifest+json");
+  const manifest = await m.json();
+  expect(manifest.display).toBe("standalone");
+  expect(manifest.icons.some((i: { sizes: string }) => i.sizes === "512x512")).toBe(true);
+  for (const icon of manifest.icons) expect((await fetch(`${base}${icon.src}`)).status).toBe(200);
+
+  const sw = await fetch(`${base}/sw.js`);
+  expect(sw.headers.get("content-type")).toBe("text/javascript");
+  expect(await sw.text()).toContain('addEventListener("fetch"');
+  expect((await fetch(`${base}/offline.html`)).status).toBe(200);
+  expect((await fetch(`${base}/icons/../config.ts`)).status).toBe(404);
+
+  const page = await fetch(`${base}/`);
+  expect(page.headers.get("content-security-policy")).toContain("manifest-src 'self'; worker-src 'self'");
+  expect(await page.text()).toContain('<link rel="manifest" href="/manifest.webmanifest">');
+});
+
+test("state endpoint reports progress and a change version", async () => {
+  const s = await (await fetch(`${base}/state`)).json();
+  expect(s.polling).toBe(false);
+  expect(s.progress).toEqual({ current: null, done: 0, total: 0 });
+  expect(typeof s.version).toBe("string");
+  expect(typeof s.awaiting).toBe("number");
+});
+
+test("rejects foreign Host headers (DNS rebinding)", async () => {
+  const res = await fetch(`${base}/`, { headers: { Host: "evil.example:80" } });
+  expect(res.status).toBe(403);
+});
+
+test("POST without a valid CSRF token is refused", async () => {
+  const body = new URLSearchParams({ repo: "backend", branch: "x", csrf: "nope" });
+  const res = await fetch(`${base}/issues/ENG-9/reject`, { method: "POST", body, redirect: "manual" });
+  expect(res.status).toBe(403);
+  expect(store.getIssueByIdentifier("ENG-9")!.status).toBe("pending");
+});
+
+test("cross-origin POST is refused even with a token", async () => {
+  const csrf = csrfFrom(await (await fetch(`${base}/`)).text());
+  const res = await fetch(`${base}/issues/ENG-9/reject`, {
+    method: "POST", body: new URLSearchParams({ csrf }), headers: { Origin: "https://evil.example" }, redirect: "manual",
+  });
+  expect(res.status).toBe(403);
+});
+
+test("pages keep the browser's Origin on same-origin form posts", async () => {
+  const res = await fetch(`${base}/`);
+  expect(res.headers.get("referrer-policy")).toBe("same-origin");
+});
+
+test("reject via the form, as a browser sends it", async () => {
+  const csrf = csrfFrom(await (await fetch(`${base}/`)).text());
+  const res = await fetch(`${base}/issues/ENG-9/reject`, {
+    method: "POST", body: new URLSearchParams({ csrf }), headers: { Origin: base }, redirect: "manual",
+  });
+  expect(res.status).toBe(303);
+  expect(store.getIssueByIdentifier("ENG-9")!.status).toBe("rejected");
+  expect(await (await fetch(`${base}/`)).text()).toContain(`<h2>Awaiting approval</h2><span class="count">0</span>`);
+});

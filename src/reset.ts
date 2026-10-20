@@ -1,0 +1,43 @@
+import { rmSync } from "node:fs";
+import { loadConfig, oauthRedirectUrl, oauthScope } from "./config";
+import { Store } from "./db";
+import { KeychainOAuthProvider, LinearClient, LoginRequiredError } from "./linear";
+import { CURSOR_KEY, isEligible } from "./autopilot";
+
+// Clears every ticket that hasn't been launched (pending, failed, rejected or dismissed) with its
+// brief, then queues the tickets eligible right now so the next poll (or "Poll now") triages them
+// afresh. Launched tickets keep their row, brief and PR tracking. Safe while the daemon runs.
+
+const cfg = loadConfig();
+const store = new Store(cfg.stateDir);
+const linear = new LinearClient(new KeychainOAuthProvider(oauthRedirectUrl(cfg), oauthScope(cfg), () => {
+  throw new LoginRequiredError();
+}));
+
+try {
+  const me = cfg.linearUserId || (await linear.viewer()).id;
+  const eligible = (await linear.assignedToMe()).filter((r) => isEligible(cfg, r.assigneeId, r.stateName, r.stateType, me));
+
+  const kept = store.listByStatus(["approved", "running"], 1000);
+  const keptIds = new Set(kept.map((r) => r.linear_id));
+  const cleared = store.listByStatus(["pending", "failed", "rejected"], 1000);
+  const queued = eligible.filter((r) => !keptIds.has(r.id));
+
+  store.db.transaction(() => {
+    store.db.exec("DELETE FROM issues WHERE status IN ('pending', 'failed', 'rejected'); DELETE FROM assignments;");
+    // Launched tickets stay tracked as handled so they're never proposed again by this reset.
+    for (const r of kept) store.markAssigned(r.linear_id, r.identifier, true);
+    for (const r of queued) store.markAssigned(r.id, r.identifier, false);
+    store.setMeta(CURSOR_KEY, new Date().toISOString());
+  })();
+  for (const r of cleared) rmSync(r.brief_path, { force: true });
+
+  console.log(`Cleared ${cleared.length} unlaunched tickets; kept ${kept.length} launched: ${kept.map((r) => r.identifier).join(", ") || "(none)"}`);
+  console.log(`Queued ${queued.length} for triage: ${queued.map((r) => r.identifier).join(", ") || "(none)"}`);
+  console.log('They are triaged on the next poll; click "Poll now" to start right away.');
+} catch (err) {
+  console.error(`Reset failed: ${(err as Error).message}`);
+  process.exitCode = 1;
+} finally {
+  await linear.close();
+}
