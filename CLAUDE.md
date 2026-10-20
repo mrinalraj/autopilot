@@ -11,14 +11,15 @@ user-facing picture.
 bun test                 # must pass before you finish; the e2e test uses fakes, never real Linear/Supacode
 bun run typecheck        # tsc --noEmit
 bun run once             # one real poll against Linear (needs `bun run login` done)
-bun run cli service restart   # restart the installed daemon (LaunchAgent dev.linear-autopilot) to load changes
+bun run start            # dev daemon on http://localhost:4800
 bun run build            # standalone binaries + tarballs + checksums.txt in dist/
 tail -f logs/autopilot.log
 ```
 
-The daemon normally runs as a LaunchAgent. Don't also start `bun run start` while it's running:
-both bind port 4747. `src/cli.ts` is the single entry point, both from source and as the compiled
-binary.
+The installed app (Homebrew, `brew services`) serves http://localhost:4747. From source the default
+port is 4800 and the data lives in the project folder, so `bun run start` runs alongside it. Both
+share the Linear login in the Keychain: signing out in one signs out the other. `src/cli.ts` is the single entry point, both from source
+and as the compiled binary.
 
 Config, state and logs live under `HOME_DIR` (`config.ts`):
 - `AUTOPILOT_HOME` if set

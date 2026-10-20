@@ -318,7 +318,7 @@ project directory, and `~` is expanded.
 | `pollIntervalSeconds` | `1200` | Linear poll interval. **Poll now** triggers one immediately. |
 | `workCheckIntervalSeconds` | `300` | Commit and PR check interval for launched tickets. |
 | `pickupStates` | `["Ready for Development"]` | Linear status names (case-insensitive) that make an assigned ticket eligible. `[]` = any open state. |
-| `port` | `4747` | Web page; binds to `127.0.0.1` only. |
+| `port` | `4747` (`4800` from source) | Web page; binds to `127.0.0.1` only. |
 | `oauthCallbackPort` | `4748` | Loopback redirect used by `bun run login`. |
 | `reposRoot` | `~/code` | Every git repo directly under it is a launch target. |
 | `stateDir` / `briefsDir` | `./state` / `./state/briefs` | |

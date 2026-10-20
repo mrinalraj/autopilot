@@ -91,7 +91,7 @@ export interface Config {
 const DEFAULTS: Config = {
   pollIntervalSeconds: 1200,
   workCheckIntervalSeconds: 300,
-  port: 4747,
+  port: COMPILED ? 4747 : 4800, // from source, stay clear of the installed app
   oauthCallbackPort: 4748,
   repoMode: "folder",
   reposRoot: join(homedir(), "code"),
