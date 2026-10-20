@@ -485,8 +485,13 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
           return redirect("/");
         }
         if (path === "/settings") {
+          const githubBefore = ap.cfg.githubUser;
           const res = saveSettings(ap.cfg, form);
           if (res.errors.length) return redirect(`/settings?error=${encodeURIComponent(res.errors.join(" "))}`);
+          if (ap.cfg.githubUser !== githubBefore) {
+            void ap.refreshWork(); // notices the new account and re-checks every ticket
+            res.notes.push("Re-checking every ticket's PRs with the new GitHub account.");
+          }
           reschedule?.();
           void health?.refresh();
           return redirect(`/settings?notice=${encodeURIComponent(["Saved.", ...res.notes].join(" "))}`);

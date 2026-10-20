@@ -12,10 +12,12 @@ import { scanWorktrees, type FoundWorktree } from "./importer";
 import { browserLogin, signOut } from "./login";
 import { launchSteps, step, withTicket } from "./steps";
 import { notify } from "./notify";
-import { atRisk, checkWork, isSettled, overallStage, workFingerprint, type RepoWork } from "./work";
+import { atRisk, checkWork, githubAccount, isSettled, overallStage, workFingerprint, type RepoWork } from "./work";
 import { log } from "./log";
 
 export const CURSOR_KEY = "poll_cursor";
+/** GitHub account the last work check ran as; a different one re-checks settled tickets too. */
+const GITHUB_KEY = "github_account";
 /** Re-read a window before the cursor to absorb clock skew between us and the tracker. */
 const CURSOR_OVERLAP_MS = 5 * 60_000;
 
@@ -138,6 +140,11 @@ export class Autopilot {
     const started = Date.now();
     if (!only) log.info("Refreshing commits and PR status…");
     try {
+      // The previous account may not have seen some PRs (or saw ones this one can't), so start over.
+      const account = only ? null : await githubAccount(this.cfg.githubUser);
+      const previous = this.store.getMeta(GITHUB_KEY);
+      const everything = account !== null && previous !== null && account !== previous;
+      if (everything) log.info(`GitHub account is now ${account || "(none)"}; re-checking every ticket's commits and PRs`);
       const rows = only ? [this.store.getIssue(only)].filter((r): r is IssueRow => !!r) : this.store.listByStatus(["running"], 200);
       for (const row of rows) {
         if (!row.worktree_id) {
@@ -145,7 +152,7 @@ export class Autopilot {
           continue;
         }
         const prev = Autopilot.work(row);
-        if (isSettled(prev) && !only) continue;
+        if (isSettled(prev) && !only && !everything) continue;
         try {
           const repos = [
             { repo: row.repo, repoPath: row.repo_path, worktreeId: row.worktree_id },
@@ -164,6 +171,7 @@ export class Autopilot {
           log.warn(`work check failed for ${row.identifier}`, err);
         }
       }
+      if (account !== null) this.store.setMeta(GITHUB_KEY, account);
       if (!only) log.info(`Commits and PR status refreshed in ${((Date.now() - started) / 1000).toFixed(1)}s`);
     } finally {
       if (!only) this.checkingWork = false;

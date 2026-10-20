@@ -328,7 +328,7 @@ project directory, and `~` is expanded.
 | `oauthCallbackPort` | `4748` | Loopback redirect used by `bun run login`. |
 | `reposRoot` | `~/code` | Every git repo directly under it is a launch target. |
 | `stateDir` / `briefsDir` | `./state` / `./state/briefs` | `./state/jira` for Jira. |
-| `githubUser` | `""` | GitHub account used for PR tracking. Empty means `gh`'s active account. Set it if you keep several `gh` logins, so switching accounts doesn't break tracking. |
+| `githubUser` | `""` | GitHub account used for PR tracking. Empty means `gh`'s active account. Set it if you keep several `gh` logins, so switching accounts doesn't break tracking. When the account changes (here, or gh's active one when this is empty), the next check re-reads every ticket's PRs, completed ones included. |
 | `linearUserId` | `""` | Empty = the logged-in Linear user. |
 | `processExistingOnFirstRun` | `false` | Triage already-eligible tickets on the very first poll. |
 | `moveToInProgressOnApprove` | `false` | Moves the Linear issue to its team's started state after launch. Needs the write scope: run `bun run login --force` after enabling it. |

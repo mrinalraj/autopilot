@@ -30,6 +30,11 @@ async function out(argv: string[], cwd: string, env: Record<string, string | und
   return stdout.trim();
 }
 
+/** The account PR checks run as: the pinned one, else gh's active account ("" when gh isn't set up). */
+export async function githubAccount(pinned: string): Promise<string> {
+  return pinned || out(["gh", "config", "get", "-h", "github.com", "user"], "/").catch(() => "");
+}
+
 let cachedToken: { user: string; token: string; at: number } | null = null;
 
 /**
