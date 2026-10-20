@@ -125,16 +125,37 @@ test("setup banners: optional ones dismiss and stay dismissed, required ones can
   expect(await (await fetch(`${base}/`)).text()).toContain("Log in to gh");
 });
 
+test("log panel is prefilled, escaped, and /events streams only newer lines", async () => {
+  const { log } = await import("../src/log");
+  log.info("<b>marker-one</b>");
+  const html = await (await fetch(`${base}/`)).text();
+  expect(html).toContain('<aside id="logs" class="logs"');
+  expect(html).toContain("&lt;b&gt;marker-one&lt;/b&gt;");
+  expect(html).not.toContain("<b>marker-one</b>");
+  const last = Number(/id="logs" class="logs" aria-label="Activity log" data-last="(\d+)"/.exec(html)![1]);
+  log.warn("marker-two");
+  const fresh = await (await fetch(`${base}/events?since=${last}`)).json();
+  expect(fresh.map((e: { msg: string; level: string }) => [e.level, e.msg])).toEqual([["warn", "marker-two"]]);
+});
+
 test("rejects foreign Host headers (DNS rebinding)", async () => {
   const res = await fetch(`${base}/`, { headers: { Host: "evil.example:80" } });
   expect(res.status).toBe(403);
 });
 
-test("POST without a valid CSRF token is refused", async () => {
+test("POST with a stale or missing CSRF token does nothing and says the page was out of date", async () => {
   const body = new URLSearchParams({ repo: "backend", branch: "x", csrf: "nope" });
   const res = await fetch(`${base}/issues/ENG-9/reject`, { method: "POST", body, redirect: "manual" });
-  expect(res.status).toBe(403);
+  expect(res.status).toBe(303);
+  expect(decodeURIComponent(res.headers.get("location")!)).toContain("out of date");
   expect(store.getIssueByIdentifier("ENG-9")!.status).toBe("pending");
+});
+
+test("the CSRF token is stored, so pages stay valid across restarts", async () => {
+  const csrf = csrfFrom(await (await fetch(`${base}/`)).text());
+  expect(store.getMeta("csrf_token")).toBe(csrf);
+  const s = await (await fetch(`${base}/state`)).json();
+  expect(typeof s.boot).toBe("string"); // open pages reload when this changes
 });
 
 test("cross-origin POST is refused even with a token", async () => {

@@ -55,6 +55,7 @@ h1 { font-size:20px; margin:0; letter-spacing:-.01em; } h3 { font-size:13px; mar
 .card .summary { color:var(--muted); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .card .actions { display:flex; gap:8px; align-items:center; margin-top:auto; padding-top:4px; }
 .card .actions form { margin:0; }
+.card .actions { flex-wrap:wrap; }
 .cardhead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .ident { font:600 12px ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--muted); }
 .pills { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
@@ -74,6 +75,10 @@ button, .btn { font:inherit; font-weight:600; font-size:13px; padding:7px 14px; 
   background:var(--panel); color:var(--text); display:inline-flex; align-items:center; gap:6px; transition:filter .12s, background .12s; }
 button:hover, .btn:hover { filter:brightness(1.08); text-decoration:none; }
 button:disabled { opacity:.5; cursor:default; filter:none; }
+button.busy { pointer-events:none; opacity:.85; }
+button.busy::before { content:""; width:12px; height:12px; border:2px solid currentColor; border-right-color:transparent;
+  border-radius:50%; animation:spin .7s linear infinite; flex:none; }
+button.x.busy::before { width:10px; height:10px; }
 .primary { background:linear-gradient(135deg, var(--accent), var(--accent-2)); border-color:transparent; color:#fff; }
 .ghost-danger { color:var(--bad); background:transparent; }
 .ghost-danger:hover { background:var(--bad-soft); filter:none; }
@@ -130,6 +135,9 @@ details.danger ul { margin:8px 0; }
 .tip form { margin:0; }
 .tip .x { border:0; background:transparent; color:var(--muted); font-size:18px; line-height:1; padding:2px 6px; }
 .tip .x:hover { color:var(--text); background:var(--inset); }
+.tip.hint { padding:6px 12px; align-items:center; background:transparent; border-style:dashed; font-size:12.5px; }
+.tip.hint strong { display:inline; font-size:12.5px; }
+.tip.hint .x { font-size:15px; }
 .restore { margin-top:6px; } .restore button { border:0; background:transparent; color:var(--muted); font-size:12px; padding:0; font-weight:500; }
 .restore button:hover { color:var(--accent); filter:none; }
 @media (display-mode: standalone) { .browser-only { display:none; } }
@@ -149,6 +157,19 @@ details.danger ul { margin:8px 0; }
 .actrow:first-of-type { border-top:0; }
 .actrow form { margin:0; flex:none; } .actrow form button { min-width:170px; justify-content:center; }
 .gear { font-size:18px; padding:6px 10px; }
+
+/* Live log panel */
+.step { display:flex; gap:8px; align-items:center; font-size:12.5px; color:var(--warn); position:relative; z-index:1; }
+.logs { position:fixed; top:0; right:0; bottom:0; width:min(460px, 100%); z-index:40; display:none; flex-direction:column;
+  background:#0c0c0b; color:#d6d6d0; border-left:1px solid #2a2a27; box-shadow:-20px 0 50px rgba(0,0,0,.35); }
+body.logs-open .logs { display:flex; }
+@media (min-width: 1400px) { body.logs-open main { margin-right:470px; } }
+.logs-head { display:flex; gap:10px; align-items:center; padding:12px 14px; border-bottom:1px solid #2a2a27; }
+.logs-head strong { color:#f2f2ee; } .logs-head .x { margin-left:auto; color:#9b9b94; }
+.logs-body { flex:1; overflow:auto; padding:10px 14px; font:12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.logs .ln { white-space:pre-wrap; word-break:break-word; padding:1px 0; }
+.logs .ln .ts { color:#6f6f68; margin-right:10px; }
+.logs .ln.warn { color:#ffc078; } .logs .ln.error { color:#ff8fab; }
 
 /* Misc */
 .alert { border-radius:10px; padding:8px 12px; background:var(--bad-soft); color:var(--bad); white-space:pre-wrap; word-break:break-word; font-size:13px; }
@@ -196,6 +217,28 @@ ul { margin:0; padding-left:18px; } li { margin:2px 0; }
  * Runs under a per-response CSP nonce, so nothing inside ticket text can execute.
  */
 const LIVE_SCRIPT = `(() => {
+  // Every action is a form post; show it's working (spinner + label from data-busy) and block double submits.
+  document.addEventListener("submit", (e) => {
+    const form = e.target;
+    if (form.dataset.busy) { e.preventDefault(); return; }
+    const btn = e.submitter || form.querySelector("button");
+    form.dataset.busy = "1";
+    if (!btn) return;
+    btn.dataset.label = btn.innerHTML;
+    btn.classList.add("busy");
+    btn.setAttribute("aria-busy", "true");
+    if (btn.dataset.busyLabel !== undefined) btn.textContent = btn.dataset.busyLabel || btn.textContent;
+  });
+  // Coming back with the Back button restores the page from cache: clear the busy state.
+  addEventListener("pageshow", () => {
+    document.querySelectorAll("form[data-busy]").forEach((f) => delete f.dataset.busy);
+    document.querySelectorAll("button.busy").forEach((b) => {
+      b.classList.remove("busy");
+      b.removeAttribute("aria-busy");
+      if (b.dataset.label !== undefined) b.innerHTML = b.dataset.label;
+    });
+  });
+
   const live = document.getElementById("live");
   if (!live) return;
   let version = live.dataset.version, stale = false;
@@ -223,14 +266,50 @@ const LIVE_SCRIPT = `(() => {
     }
     live.append(box);
   };
+  // Live log panel: open/closed is remembered per browser; approving a ticket opens it.
+  const logs = document.getElementById("logs"), body = document.getElementById("logbody"), toggle = document.getElementById("logtoggle");
+  let lastId = Number(logs?.dataset.last || 0);
+  const setOpen = (open) => {
+    document.body.classList.toggle("logs-open", open);
+    toggle?.setAttribute("aria-expanded", String(open));
+    try { localStorage.setItem("logsOpen", open ? "1" : "0"); } catch {}
+  };
+  let saved = null;
+  try { saved = localStorage.getItem("logsOpen"); } catch {}
+  setOpen(new URLSearchParams(location.search).has("logs") || saved === "1");
+  toggle?.addEventListener("click", () => setOpen(!document.body.classList.contains("logs-open")));
+  document.getElementById("logclose")?.addEventListener("click", () => setOpen(false));
+  if (body) body.scrollTop = body.scrollHeight;
+  const pullLogs = async () => {
+    if (!body) return;
+    const items = await (await fetch("/events?since=" + lastId, { cache: "no-store" })).json();
+    if (!items.length) return;
+    const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+    for (const e of items) {
+      const line = el("div", "ln " + e.level), ts = el("span", "ts");
+      ts.textContent = new Date(e.at).toTimeString().slice(0, 8);
+      line.append(ts, document.createTextNode(e.msg));
+      body.append(line);
+      lastId = e.id;
+    }
+    while (body.childElementCount > 400) body.firstElementChild.remove();
+    if (atBottom) body.scrollTop = body.scrollHeight;
+  };
+
   const tick = async () => {
     let busy = false;
     try {
       const s = await (await fetch("/state", { cache: "no-store" })).json();
       busy = !!s.activity || s.progress.total > 0;
       render(s);
+      for (const [id, msg] of Object.entries(s.launching || {})) {
+        const node = document.querySelector('[data-step="' + CSS.escape(id) + '"]');
+        if (node) node.textContent = msg;
+      }
+      await pullLogs();
       badge(s.awaiting);
-      if (s.version !== version) { if (modalOpen()) stale = true; else return location.reload(); }
+      // New tickets or statuses, or the app restarted (e.g. after an update): reload once no modal is open.
+      if (s.version !== version || (live.dataset.boot && s.boot !== live.dataset.boot)) { if (modalOpen()) stale = true; else return location.reload(); }
     } catch {}
     setTimeout(tick, busy ? 1500 : 10000);
   };

@@ -110,7 +110,13 @@ test("git launcher creates, reuses and removes worktrees in the configured folde
   expect(path).toBe(join(dir, "made", "api", "new-work-eng-77"));
   expect(existsSync(join(path, ".git"))).toBe(true);
   expect(await l.ensureWorktree(repo, "new-work-eng-77", false)).toBe(path); // reused
-  await l.openSession({ identifier: "ENG-77", primaryPath: path, otherPaths: [], prompt: "p", addDirs: [], background: true }); // terminal "none"
+  await l.openSession({ identifier: "ENG-77", briefPath: "", others: [], primaryPath: path, otherPaths: [], prompt: "p", addDirs: [], background: true }); // terminal "none"
   await l.removeWorktree(repo, path, "new-work-eng-77", false);
   expect(existsSync(path)).toBe(false);
+
+  // A worktree folder deleted by hand leaves git's entry behind; the next launch recreates it.
+  const again = await l.ensureWorktree(repo, "new-work-eng-77", false);
+  rmSync(again, { recursive: true, force: true });
+  expect(await l.ensureWorktree(repo, "new-work-eng-77", false)).toBe(again);
+  expect(existsSync(join(again, ".git"))).toBe(true);
 });

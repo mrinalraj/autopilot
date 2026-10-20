@@ -6,8 +6,9 @@ import { loadCatalog, type RepoEntry } from "./catalog";
 import { explain, resolveRepo, type Explainer } from "./triage";
 import { briefPath, initPrompt, removeBrief, snapshot, writeBrief, type TicketSnapshot } from "./brief";
 import { isValidBranch, normalizeBranch } from "./branch";
-import { launcherFor, supacodeId, supacodeWorktreePaths } from "./launch";
+import { launcherFor, pathFromId, resendIdePrompt, supacodeId, supacodeWorktreePaths } from "./launch";
 import { scanWorktrees, type FoundWorktree } from "./importer";
+import { launchSteps, step, withTicket } from "./steps";
 import { notify } from "./notify";
 import { atRisk, checkWork, isSettled, overallStage, workFingerprint, type RepoWork } from "./work";
 import { log } from "./log";
@@ -83,6 +84,8 @@ export class Autopilot {
 
   /** What the daemon is doing right now, for the page's activity banner (triage has its own). */
   activity(): string | null {
+    const launching = [...launchSteps.entries()][0];
+    if (launching) return `Launching ${launching[0]}: ${launching[1]}`;
     if (this.polling) return "Checking Linear for new tickets…";
     if (this.checkingWork) return "Refreshing commits and PR status…";
     return null;
@@ -92,6 +95,8 @@ export class Autopilot {
   async refreshWork(only?: string): Promise<void> {
     if (this.checkingWork && !only) return;
     if (!only) this.checkingWork = true;
+    const started = Date.now();
+    if (!only) log.info("Refreshing commits and PR status…");
     try {
       const rows = only ? [this.store.getIssue(only)].filter((r): r is IssueRow => !!r) : this.store.listByStatus(["running"], 200);
       for (const row of rows) {
@@ -119,6 +124,7 @@ export class Autopilot {
           log.warn(`work check failed for ${row.identifier}`, err);
         }
       }
+      if (!only) log.info(`Commits and PR status refreshed in ${((Date.now() - started) / 1000).toFixed(1)}s`);
     } finally {
       if (!only) this.checkingWork = false;
     }
@@ -227,10 +233,17 @@ export class Autopilot {
   async poll(): Promise<void> {
     if (this.polling) return;
     this.polling = true;
+    const started = Date.now();
     try {
+      log.info("Checking Linear for tickets…");
       await this.detectAssignments();
+      const queued = this.store.unhandled().length;
       await this.processQueue();
-      await this.importExisting().catch((err) => log.warn("import of existing work failed", err));
+      const imported = await this.importExisting().catch((err) => {
+        log.warn("import of existing work failed", err);
+        return [] as string[];
+      });
+      log.info(`Linear check done in ${((Date.now() - started) / 1000).toFixed(1)}s: ${queued} to triage, ${imported.length} imported`);
       this.lastPollError = null;
     } catch (err) {
       const msg = (err as Error).message;
@@ -401,24 +414,30 @@ export class Autopilot {
    * the brief dir and the extra worktrees added.
    */
   private async runLaunch(row: IssueRow) {
+    return withTicket(row.identifier, () => this.launchSteps(row));
+  }
+
+  private async launchSteps(row: IssueRow) {
     try {
       // A retry keeps the launcher that already made some of the worktrees.
       const launcher = launcherFor(this.cfg, row.launcher);
       this.store.updateIssue(row.linear_id, { launcher: launcher.name });
       const extras = Store.extras(row);
-      const others: { repo: string; path: string }[] = [];
-      for (const e of extras) {
-        const path = await launcher.ensureWorktree(e.repo_path, row.branch, true);
-        e.worktree_id = supacodeId(path);
-        others.push({ repo: e.repo, path });
-        this.store.updateIssue(row.linear_id, { extra_repos_json: JSON.stringify(extras) });
-      }
-      const primaryPath = await launcher.ensureWorktree(row.repo_path, row.branch, this.cfg.launch.background);
-      this.store.updateIssue(row.linear_id, { worktree_id: supacodeId(primaryPath) });
+      step(`Preparing ${extras.length + 1} worktree${extras.length ? "s" : ""} on ${row.branch}`);
+      // Repos are independent, so fetch and create their worktrees in parallel (extras in the background).
+      const [primaryPath, ...extraPaths] = await Promise.all([
+        launcher.ensureWorktree(row.repo_path, row.branch, this.cfg.launch.background),
+        ...extras.map((e) => launcher.ensureWorktree(e.repo_path, row.branch, true)),
+      ]);
+      extras.forEach((e, i) => (e.worktree_id = supacodeId(extraPaths[i])));
+      const others = extras.map((e, i) => ({ repo: e.repo, path: extraPaths[i] }));
+      this.store.updateIssue(row.linear_id, { worktree_id: supacodeId(primaryPath), extra_repos_json: JSON.stringify(extras) });
       writeBrief(this.store.getIssue(row.linear_id)!);
 
       await launcher.openSession({
         identifier: row.identifier,
+        briefPath: row.brief_path,
+        others,
         primaryPath,
         otherPaths: others.map((o) => o.path),
         prompt: initPrompt(row.brief_path, others),
@@ -426,6 +445,7 @@ export class Autopilot {
         background: this.cfg.launch.background,
       });
       this.store.updateIssue(row.linear_id, { status: "running", error: null });
+      step("Launched");
       void this.refreshWork();
       if (this.cfg.moveToInProgressOnApprove) {
         try {
@@ -479,6 +499,54 @@ export class Autopilot {
     await this.refreshWork(row.linear_id);
     if (failed.length) return { ok: false, error: `could not delete: ${failed.join("; ")}` };
     return { ok: true, message: `Deleted ${live.length} worktree${live.length === 1 ? "" : "s"} for ${row.identifier}.` };
+  }
+
+  /**
+   * Undoes a launch: deletes any of the ticket's worktrees that remain (same safety checks as
+   * deleteWorktrees) and puts it back in Awaiting approval with its triage intact. Branches stay.
+   */
+  async sendBackToApproval(identifier: string, force: boolean): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+    const row = this.store.getIssueByIdentifier(identifier);
+    if (!row) return { ok: false, error: "unknown issue" };
+    if (!["running", "failed"].includes(row.status)) return { ok: false, error: `only launched tickets can be sent back (this one is ${row.status})` };
+    if (!row.repo) return { ok: false, error: "this ticket was imported without a repo; there's no triage to go back to" };
+
+    const live = (await Promise.all(Autopilot.worktrees(row).map(async (w) => ({ ...w, work: await checkWork(w.worktreeId, w.repoPath, row.branch) }))))
+      .filter((c) => !c.work.missing);
+    if (live.length) {
+      const res = await this.deleteWorktrees(identifier, force);
+      if (!res.ok) return res;
+    }
+    const fresh = this.store.getIssue(row.linear_id)!;
+    const extras = Store.extras(fresh).map((e) => ({ ...e, worktree_id: null }));
+    this.store.updateIssue(row.linear_id, { status: "pending", error: null, worktree_id: null, launcher: null, extra_repos_json: JSON.stringify(extras) });
+    this.store.db.query("UPDATE issues SET work_json = NULL WHERE linear_id = ?").run(row.linear_id);
+    writeBrief(this.store.getIssue(row.linear_id)!);
+    log.info(`${identifier} sent back to approval`);
+    return { ok: true, message: `${identifier} is back in Awaiting approval${live.length ? ` (removed ${live.length} worktree${live.length === 1 ? "" : "s"})` : ""}.` };
+  }
+
+  /** Sends a VS Code/Cursor ticket's prompt to the editor's chat again (after trusting its folder). */
+  async resendPrompt(identifier: string): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+    const row = this.store.getIssueByIdentifier(identifier);
+    if (!row?.worktree_id || (row.launcher !== "vscode" && row.launcher !== "cursor")) return { ok: false, error: "not a VS Code/Cursor launch" };
+    const others = Store.extras(row).flatMap((e) => (e.worktree_id ? [{ repo: e.repo, path: pathFromId(e.worktree_id) }] : []));
+    try {
+      await resendIdePrompt(this.cfg, row.launcher, {
+        identifier: row.identifier,
+        briefPath: row.brief_path,
+        others,
+        primaryPath: pathFromId(row.worktree_id),
+        otherPaths: others.map((o) => o.path),
+        prompt: "",
+        addDirs: [],
+        background: false,
+      });
+      log.info(`${identifier}: sent the prompt to the ${row.launcher === "vscode" ? "VS Code" : "Cursor"} chat again`);
+      return { ok: true, message: `Sent ${identifier}'s prompt to the chat; press Enter there to start.` };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
   }
 
   reject(identifier: string): { ok: true } | { ok: false; error: string } {

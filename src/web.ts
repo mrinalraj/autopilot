@@ -1,5 +1,8 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { esc, page } from "./html";
+import { eventsSince } from "./log";
+import { mkdirSync } from "node:fs";
+import { launchSteps } from "./steps";
 import { launcherFor, pathFromId } from "./launch";
 import { LOG_PATH } from "./config";
 import { ICONS, MANIFEST, offlinePage, SERVICE_WORKER } from "./pwa";
@@ -85,7 +88,11 @@ const repoPills = (r: IssueRow) =>
 export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: Health; reschedule?: () => void } = {}) {
   const { updater, health, reschedule } = extras;
   const port = ap.cfg.port;
-  const csrf = randomBytes(24).toString("hex");
+  // Kept in the database so pages stay valid across restarts and updates (per install, never sent elsewhere).
+  const csrf = ap.store.getMeta("csrf_token") ?? randomBytes(24).toString("hex");
+  ap.store.setMeta("csrf_token", csrf);
+  // Changes on every start; open pages reload when it does, picking up new UI after an update.
+  const bootId = randomBytes(6).toString("hex");
   const allowedHosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`]);
   const tokenField = `<input type="hidden" name="csrf" value="${csrf}">`;
 
@@ -112,9 +119,9 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
       : `<form method="post" action="${actionBase(r)}/approve">${tokenField}
            <input type="hidden" name="repo" value="${esc(r.repo)}"><input type="hidden" name="branch" value="${esc(r.branch)}">
            ${Store.extras(r).map((e) => `<input type="hidden" name="extra" value="${esc(e.repo)}">`).join("")}
-           <button class="primary">${r.status === "failed" ? "Retry launch" : "Approve"}</button></form>`;
+           <button class="primary" data-busy-label="Launching…">${r.status === "failed" ? "Retry launch" : "Approve"}</button></form>`;
     const actions = actionable(r)
-      ? `<div class="actions">${approve}<form method="post" action="${actionBase(r)}/reject">${tokenField}<button class="ghost-danger">Reject</button></form></div>`
+      ? `<div class="actions">${approve}<form method="post" action="${actionBase(r)}/reject">${tokenField}<button class="ghost-danger" data-busy-label="Rejecting…">Reject</button></form></div>`
       : "";
     return `<article class="card s-${r.status}">
       <div class="cardhead">${badge(r.status, r.error)}<span class="ident">${esc(r.identifier)}</span>${confidence(r)}</div>
@@ -122,6 +129,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
       <div class="pills">${repoPills(r)}${ex.size ? `<span class="pill">size ${esc(ex.size)}</span>` : ""}<span class="pill mono">${esc(r.branch)}</span></div>
       <div class="summary">${esc(ex.summary)}</div>
       ${r.status === "failed" && r.error ? `<div class="alert">${esc(r.error)}</div>` : ""}
+      ${r.status === "approved" ? `<div class="step"><span class="spinner"></span><span data-step="${esc(r.identifier)}">${esc(launchSteps.get(r.identifier) ?? "Starting…")}</span></div>` : ""}
       ${actions}
     </article>`;
   }
@@ -144,7 +152,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
       <div class="pills">${r.repo ? repoPills(r) : ""}<span class="pill mono">${esc(r.branch)}</span></div>
       ${summary}
       <div class="actions">${prs.map((w) => `<a class="btn primary" href="${esc(w.pr!.url)}" target="_blank" rel="noreferrer">${multi ? `${esc(w.repo)} ` : ""}PR #${w.pr!.number} ↗</a>`).join("")}
-        ${wt ? `<a class="btn" href="${esc(wt)}">Open worktree</a>` : ""}</div>
+        ${wt ? `<a class="btn" href="${esc(wt)}">Open worktree</a>` : ""}${resendButton(r)}</div>
     </article>`;
   }
 
@@ -178,6 +186,25 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
       ${list.map(repoFacts).join("")}</div>`;
   }
 
+  /** For VS Code/Cursor chat launches: re-send the prompt (e.g. after trusting the folder). */
+  function resendButton(r: IssueRow) {
+    if (!r.worktree_id || (r.launcher !== "vscode" && r.launcher !== "cursor") || ap.cfg.launch.ideSession !== "chat") return "";
+    return `<form method="post" action="${actionBase(r)}/resend-prompt">${tokenField}<button data-busy-label="Sending…" title="Send the prompt to the editor's chat again">Send prompt to chat</button></form>`;
+  }
+
+  /** "Send back to approval…": undo a launch (removes what's left of its worktrees), keeping triage. */
+  function sendBackBox(r: IssueRow) {
+    if ((r.status !== "running" && r.status !== "failed") || !r.repo) return "";
+    const risks = (Autopilot.work(r) ?? []).flatMap((w) => atRisk(w).map((x) => `${w.repo}: ${x}`));
+    return `<details class="danger"><summary>Send back to approval…</summary>
+      <p class="small muted" style="margin:8px 0 4px">Moves this ticket back to Awaiting approval with its current repo, branch and explainer, so you can approve it again. Any of its worktrees that still exist are removed first (closing their Claude session); its branches are kept and reused.</p>
+      ${risks.length ? `<div class="alert">At the last check this would lose: ${esc(risks.join(", "))}. It's re-checked first.</div>` : ""}
+      <form method="post" action="${actionBase(r)}/send-back">${tokenField}
+        <label class="check"><input type="checkbox" name="force" value="1"> Remove worktrees anyway, even with uncommitted or unpushed work</label>
+        <button class="ghost-danger" type="submit" data-busy-label="Sending back…">Send back to approval</button></form>
+    </details>`;
+  }
+
   /** "Delete worktrees…" for launched tickets, listing what would be lost from the latest check. */
   function deleteBox(r: IssueRow) {
     if (r.status !== "running" && r.status !== "failed") return "";
@@ -192,7 +219,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
       ${risks.length ? `<div class="alert">At the last check this would lose: ${esc(risks.join(", "))}. It's re-checked before deleting.</div>` : ""}
       <form method="post" action="${actionBase(r)}/delete-worktrees">${tokenField}
         <label class="check"><input type="checkbox" name="force" value="1"> Delete anyway, even with uncommitted or unpushed work</label>
-        <button class="ghost-danger" type="submit">Delete worktree${live.length === 1 ? "" : "s"}</button></form>
+        <button class="ghost-danger" type="submit" data-busy-label="Deleting…">Delete worktree${live.length === 1 ? "" : "s"}</button></form>
     </details>`;
   }
 
@@ -201,12 +228,19 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
     if (!health) return "";
     const dismissed = ap.store.dismissedBanners();
     const show = health.items.filter((i) => i.level === "required" || !dismissed.has(i.id));
-    const hidden = health.items.filter((i) => i.level === "optional" && dismissed.has(i.id)).length;
-    const tip = (i: SetupItem) => `<div class="tip ${i.level}${i.browserOnly ? " browser-only" : ""}"><span class="dot"></span>
-      <div class="body"><strong>${esc(i.title)}</strong><span class="muted">${esc(i.detail)}</span>${i.command ? `<br><code>${esc(i.command)}</code>` : ""}</div>
-      ${i.level === "optional" ? `<form method="post" action="/banners/${encodeURIComponent(i.id)}/dismiss">${tokenField}<button class="x" title="Dismiss" aria-label="Dismiss ${esc(i.title)}">×</button></form>` : ""}</div>`;
+    const hidden = health.items.filter((i) => i.level !== "required" && dismissed.has(i.id)).length;
+    const link = (i: SetupItem) => (i.link ? ` <a href="${esc(i.link.href)}" target="_blank" rel="noreferrer">${esc(i.link.label)} ↗</a>` : "");
+    const dismissForm = (i: SetupItem) =>
+      `<form method="post" action="/banners/${encodeURIComponent(i.id)}/dismiss">${tokenField}<button class="x" title="Dismiss" aria-label="Dismiss ${esc(i.title)}" data-busy-label="">×</button></form>`;
+    const tip = (i: SetupItem) =>
+      i.level === "hint"
+        ? `<div class="tip hint"><span class="body"><strong>${esc(i.title)}</strong> <span class="muted">${esc(i.detail)}</span>${link(i)}</span>${dismissForm(i)}</div>`
+        : `<div class="tip ${i.level}${i.browserOnly ? " browser-only" : ""}"><span class="dot"></span>
+      <div class="body"><strong>${esc(i.title)}</strong><span class="muted">${esc(i.detail)}</span>${link(i)}${i.command ? `<br><code>${esc(i.command)}</code>` : ""}
+        ${i.action ? `<form method="post" action="${esc(i.action.path)}" style="margin-top:8px">${tokenField}<button class="primary" data-busy-label="${esc(i.action.busy)}">${esc(i.action.label)}</button></form>` : ""}</div>
+      ${i.level !== "required" ? dismissForm(i) : ""}</div>`;
     const restore = hidden
-      ? `<form class="restore" method="post" action="/banners/restore">${tokenField}<button>Show ${hidden} dismissed tip${hidden === 1 ? "" : "s"}</button></form>`
+      ? `<form class="restore" method="post" action="/banners/restore">${tokenField}<button data-busy-label="Showing…">Show ${hidden} dismissed tip${hidden === 1 ? "" : "s"}</button></form>`
       : "";
     return show.length || restore ? `<div class="setup">${show.map(tip).join("")}${restore}</div>` : "";
   }
@@ -221,7 +255,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
     const action =
       u.kind === "source"
         ? `<span class="small muted">Running from source: <code>git pull</code> and restart</span>`
-        : `<form method="post" action="/update">${tokenField}<button class="primary">${u.kind === "homebrew" ? "Update via Homebrew" : "Update now"}</button></form>`;
+        : `<form method="post" action="/update">${tokenField}<button class="primary" data-busy-label="Updating…">${u.kind === "homebrew" ? "Update via Homebrew" : "Update now"}</button></form>`;
     return `<div class="update"><div class="grow"><strong>Update available: ${esc(u.latest)}</strong>
         <span class="muted small"> · you have ${esc(u.current)} · <a href="${esc(u.url)}" target="_blank" rel="noreferrer">release notes ↗</a></span></div>
         ${action}</div>${err}`;
@@ -257,8 +291,8 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
           <label for="branch-${esc(r.identifier)}">Branch</label>
           <input type="text" id="branch-${esc(r.identifier)}" name="branch" value="${esc(r.branch)}" autocomplete="off" spellcheck="false">
           <div class="muted small" style="margin-top:6px">2–5 word kebab slug ending in <code>-${esc(r.identifier.toLowerCase())}</code>. Invalid names are repaired automatically.</div>
-          <div class="actionsbar"><button class="primary" type="submit">${r.status === "failed" ? "Retry launch" : "Approve &amp; launch"}</button>
-            <button class="ghost-danger" type="submit" formaction="${actionBase(r)}/reject">Reject</button></div>
+          <div class="actionsbar"><button class="primary" type="submit" data-busy-label="Launching…">${r.status === "failed" ? "Retry launch" : "Approve &amp; launch"}</button>
+            <button class="ghost-danger" type="submit" formaction="${actionBase(r)}/reject" data-busy-label="Rejecting…">Reject</button></div>
         </form>`
       : `<p style="margin:0"><strong>Repo:</strong> ${esc(r.repo)} <span class="muted">(${esc(r.repo_path)})</span>
           ${Store.extras(r).map((e) => `<br><strong>Also:</strong> ${esc(e.repo)} <span class="muted">(${esc(e.repo_path)})</span>`).join("")}
@@ -290,6 +324,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
                 <strong class="small">Likely areas</strong><ul class="small">${ex.likely_areas.map((a) => `<li><code>${esc(a)}</code></li>`).join("")}</ul></div>
               ${r.status === "running" ? progressBox(r) : ""}
               ${deleteBox(r)}
+              ${sendBackBox(r)}
               <div class="box"><h3>Launch</h3>${form}
                 <p class="small muted" style="margin:14px 0 0">Brief for the session: <code>${esc(r.brief_path)}</code></p></div>
             </div>
@@ -314,6 +349,17 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
       return { html: `<div class="progress"><div class="row"><div class="spinner"></div><strong>${esc(activity)}</strong></div></div>` };
     }
     return { html: "" };
+  }
+
+  /** Terminal-style live log, prefilled with recent lines; the page script appends new ones. */
+  function logPanel(): string {
+    const recent = eventsSince(0, 150);
+    const line = (e: (typeof recent)[number]) =>
+      `<div class="ln ${e.level}"><span class="ts">${esc(new Date(e.at).toTimeString().slice(0, 8))}</span>${esc(e.msg)}</div>`;
+    return `<aside id="logs" class="logs" aria-label="Activity log" data-last="${recent.at(-1)?.id ?? 0}">
+      <div class="logs-head"><strong>Activity</strong><span class="muted small">live · since the daemon started</span>
+        <button type="button" class="x" id="logclose" aria-label="Close log">×</button></div>
+      <div class="logs-body" id="logbody">${recent.map(line).join("") || `<div class="ln muted">Nothing yet.</div>`}</div></aside>`;
   }
 
   /** Changes whenever the set of tickets or their statuses change. */
@@ -343,7 +389,8 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
       queue.length ? `(${queue.length}) Linear autopilot` : "Linear autopilot",
       `<div class="top"><div class="brand"><div class="logo">L</div><div><h1>Linear autopilot</h1>
           <div class="muted small">${esc(pollInfo)} · picks up your tickets in <strong>${esc(picks)}</strong></div></div></div>
-        <div class="row"><form method="post" action="/poll">${tokenField}<button${ap.polling ? " disabled" : ""}>↻ Poll now</button></form>
+        <div class="row"><form method="post" action="/poll">${tokenField}<button${ap.polling ? " disabled" : ""} data-busy-label="Checking…">↻ Poll now</button></form>
+          <button type="button" class="btn" id="logtoggle" aria-controls="logs" aria-expanded="false">Logs</button>
           <a class="btn gear" href="/settings" title="Settings" aria-label="Settings">⚙</a></div></div>
        <div class="stats"><div class="stat"><b>${queue.length}</b><span>Awaiting</span></div>
          <div class="stat"><b>${inProgress.length}</b><span>In progress</span></div>
@@ -351,7 +398,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
          <div class="stat"><b>${prsOpen}</b><span>PRs open</span></div></div>
        ${setupBanners()}
        ${updateBanner()}
-       <div id="live" data-version="${esc(version())}" data-awaiting="${queue.length}">${banner.html}</div>
+       <div id="live" data-version="${esc(version())}" data-boot="${bootId}" data-awaiting="${queue.length}">${banner.html}</div>
        ${notice ? `<div class="notice">${esc(notice)}</div>` : ""}
        ${ap.lastPollError ? `<div class="alert" style="margin-top:14px">Last poll failed: ${esc(ap.lastPollError)}</div>` : ""}
        ${error ? `<div class="alert" style="margin-top:14px">${esc(error)}</div>` : ""}
@@ -363,7 +410,8 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
        ${inReview.length ? `<div class="section"><h2>In review</h2><span class="count">${inReview.length}</span></div><div class="grid">${inReview.map(workCard).join("")}</div>` : ""}
        ${completed.length ? `<details class="fold"><summary>Completed <span class="count">${completed.length}</span></summary><div class="recent">${completed.map(recentItem).join("")}</div></details>` : ""}
        ${rejected.length ? `<details class="fold"><summary>Rejected &amp; dismissed <span class="count">${rejected.length}</span></summary><div class="recent">${rejected.map(recentItem).join("")}</div></details>` : ""}
-       ${[...queue, ...launching, ...inProgress, ...inReview, ...completed, ...rejected].map(modal).join("")}`,
+       ${[...queue, ...launching, ...inProgress, ...inReview, ...completed, ...rejected].map(modal).join("")}
+       ${logPanel()}`,
     );
   }
 
@@ -380,7 +428,9 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
         const origin = req.headers.get("origin");
         if (origin && !allowedHosts.has(origin.replace(/^https?:\/\//, ""))) return new Response("forbidden origin", { status: 403 });
         const form = await req.formData();
-        if (!validToken(form.get("csrf"))) return new Response("bad csrf token; reload the page", { status: 403 });
+        if (!validToken(form.get("csrf"))) {
+          return redirect(`/?error=${encodeURIComponent("The page was out of date (the app had restarted), so nothing was done. Try again.")}`);
+        }
 
         if (path === "/poll") {
           void ap.poll().then(() => ap.refreshWork());
@@ -389,7 +439,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
         }
         const dismiss = path.match(/^\/banners\/([a-z-]+)\/dismiss$/);
         if (dismiss) {
-          if (health?.items.some((i) => i.id === dismiss[1] && i.level === "optional")) ap.store.dismissBanner(dismiss[1]);
+          if (health?.items.some((i) => i.id === dismiss[1] && i.level !== "required")) ap.store.dismissBanner(dismiss[1]);
           return redirect("/");
         }
         if (path === "/banners/restore") {
@@ -412,6 +462,16 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
             return redirect(`/settings?error=${encodeURIComponent(`Reset failed: ${(err as Error).message}`)}`);
           }
         }
+        if (path === "/actions/trust-folder") {
+          // Opening the folder makes the editor ask "Do you trust the authors?"; the choice stays with the user.
+          const editorApp = ap.cfg.launch.launcher === "cursor" ? "Cursor" : "Visual Studio Code";
+          mkdirSync(ap.cfg.launch.worktreesDir, { recursive: true });
+          const r = Bun.spawnSync(["open", "-a", editorApp, ap.cfg.launch.worktreesDir], { stderr: "pipe" });
+          if (r.exitCode !== 0) return redirect(`/?error=${encodeURIComponent(`Couldn't open ${editorApp}: ${r.stderr.toString().trim()}`)}`);
+          log.info(`opened ${ap.cfg.launch.worktreesDir} in ${editorApp} so it can be trusted`);
+          setTimeout(() => void health?.refresh(), 30_000); // hide the tip once trusted
+          return redirect(`/?notice=${encodeURIComponent(`Opened ${ap.cfg.launch.worktreesDir} in ${editorApp}. There, click "Manage" in the Restricted Mode bar (or "Restricted Mode" in the status bar) → Trust.`)}`);
+        }
         if (path === "/actions/recheck") {
           await health?.refresh();
           return redirect("/settings?notice=" + encodeURIComponent("Setup checks refreshed."));
@@ -430,6 +490,18 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
           const res = updater ? updater.install() : { ok: false as const, error: "updates are not available here" };
           return redirect(res.ok ? "/" : `/?error=${encodeURIComponent(`Update: ${res.error}`)}`);
         }
+        const resend = path.match(/^\/issues\/([^/]+)\/resend-prompt$/);
+        if (resend) {
+          const identifier = decodeURIComponent(resend[1]);
+          const res = await ap.resendPrompt(identifier);
+          return redirect(res.ok ? `/?notice=${encodeURIComponent(res.message)}` : `/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}`);
+        }
+        const back = path.match(/^\/issues\/([^/]+)\/send-back$/);
+        if (back) {
+          const identifier = decodeURIComponent(back[1]);
+          const res = await ap.sendBackToApproval(identifier, form.get("force") === "1");
+          return redirect(res.ok ? `/?notice=${encodeURIComponent(res.message)}` : `/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}`);
+        }
         const del = path.match(/^\/issues\/([^/]+)\/delete-worktrees$/);
         if (del) {
           const identifier = decodeURIComponent(del[1]);
@@ -444,15 +516,18 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
               ? ap.approve(identifier, String(form.get("repo") ?? ""), String(form.get("branch") ?? ""), form.getAll("extra").map(String))
               : ap.reject(identifier);
           if (!res.ok) return redirect(`/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}`);
-          return redirect("/");
+          return redirect(m[2] === "approve" ? "/?logs=1" : "/"); // show the log while it launches
         }
         return new Response("not found", { status: 404 });
       }
 
+      if (path === "/events") {
+        return Response.json(eventsSince(Number(url.searchParams.get("since") ?? 0)), { headers: { "Cache-Control": "no-store" } });
+      }
       if (path === "/state") {
         const awaiting = ap.store.listByStatus(["pending", "failed"]).length;
         return Response.json(
-          { polling: ap.polling, activity: ap.activity(), progress: ap.progress, version: version(), awaiting },
+          { polling: ap.polling, activity: ap.activity(), progress: ap.progress, version: version(), awaiting, launching: Object.fromEntries(launchSteps), boot: bootId },
           { headers: { "Cache-Control": "no-store" } },
         );
       }

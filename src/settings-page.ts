@@ -40,11 +40,11 @@ export function settingsBody(d: SettingsData): string {
     ["supacode", "Supacode: worktree and Claude tab in Supacode"],
     ["worktrunk", "Worktrunk: wt switch --create (with its hooks), Claude in your terminal"],
     ["git", "git worktree: plain git worktrees, Claude in your terminal"],
-    ["vscode", "VS Code: git worktrees opened as a VS Code workspace, Claude in your terminal"],
-    ["cursor", "Cursor: git worktrees opened as a Cursor workspace, Claude in your terminal"],
+    ["vscode", "VS Code: git worktrees opened in VS Code, Claude in its chat panel (or a terminal)"],
+    ["cursor", "Cursor: git worktrees opened in Cursor, prompt in its chat panel (or a terminal)"],
   ];
-  const action = (path: string, label: string, cls = "") =>
-    `<form method="post" action="${path}">${tokenField}<button class="${cls}">${label}</button></form>`;
+  const action = (path: string, label: string, busy: string, cls = "") =>
+    `<form method="post" action="${path}">${tokenField}<button class="${cls}" data-busy-label="${busy}">${label}</button></form>`;
 
   return `<div class="top"><div class="brand"><a class="logo" href="/" style="color:#fff;text-decoration:none">L</a><div><h1>Settings</h1>
       <div class="muted small"><a href="/">← Back to tickets</a></div></div></div></div>
@@ -72,7 +72,7 @@ export function settingsBody(d: SettingsData): string {
       <section class="box"><h3>Launch</h3>
         <label for="launcher">Launcher</label>
         <select id="launcher" name="launcher">${launchers.map(([v, l]) => `<option value="${v}"${selected(cfg.launch.launcher === v)}>${esc(l)}</option>`).join("")}</select>
-        <div class="pair"><div><label for="terminal">Terminal for Claude (non-Supacode launchers)</label>
+        <div class="pair"><div><label for="terminal">Terminal for Claude (Worktrunk, git, or editors set to Terminal)</label>
           <select id="terminal" name="terminal">
             <option value="terminal"${selected(cfg.launch.terminal === "terminal")}>Terminal (new tab)</option>
             <option value="iterm"${selected(cfg.launch.terminal === "iterm")}>iTerm (new tab)</option>
@@ -80,6 +80,14 @@ export function settingsBody(d: SettingsData): string {
             <option value="none"${selected(cfg.launch.terminal === "none")}>None: just create the worktrees</option></select></div>
         <div><label for="worktreesDir">Worktree folder (git, VS Code, Cursor)</label>
           <input type="text" id="worktreesDir" name="worktreesDir" value="${esc(cfg.launch.worktreesDir)}"></div></div>
+        <div class="pair"><div><label for="ideSession">Claude in VS Code / Cursor</label>
+          <select id="ideSession" name="ideSession">
+            <option value="chat"${selected(cfg.launch.ideSession === "chat")}>Chat panel (prompt pre-filled; press Enter)</option>
+            <option value="terminal"${selected(cfg.launch.ideSession === "terminal")}>Terminal</option></select></div>
+        <div><label for="cursorChat">Cursor's chat panel uses</label>
+          <select id="cursorChat" name="cursorChat">
+            <option value="cursor"${selected(cfg.launch.cursorChat === "cursor")}>Cursor's own chat</option>
+            <option value="claude"${selected(cfg.launch.cursorChat === "claude")}>Claude Code extension</option></select></div></div>
         <div class="pair"><div><label for="base">Base branch</label>
           <input type="text" id="base" name="base" value="${esc(cfg.launch.base)}" placeholder="default branch"></div><div></div></div>
         <label class="check"><input type="checkbox" name="fetch"${checked(cfg.launch.fetch)}> Fetch origin before creating worktrees</label>
@@ -119,16 +127,16 @@ export function settingsBody(d: SettingsData): string {
         <div class="muted small" style="margin-top:4px">Pin the account that can see your work repos, so switching gh accounts doesn't break tracking.</div>
       </section>
 
-      <div class="savebar"><button class="primary" type="submit">Save settings</button><a class="btn" href="/">Cancel</a></div>
+      <div class="savebar"><button class="primary" type="submit" data-busy-label="Saving…">Save settings</button><a class="btn" href="/">Cancel</a></div>
     </form>
 
     <section class="box" style="margin-top:20px"><h3>Maintenance</h3>
-      <div class="actrow">${action("/poll", "↻ Poll now")}<span class="muted small">Check Linear and refresh PR status now.</span></div>
-      <div class="actrow">${action("/actions/reset", "Reset tickets", "ghost-danger")}<span class="muted small">Clear tickets that haven't been launched and triage everything currently eligible again. Launched tickets are kept.</span></div>
-      <div class="actrow">${action("/actions/recheck", "Re-run setup checks")}<span class="muted small">Refresh the setup tips on the home screen.</span></div>
-      <div class="actrow">${action("/banners/restore", `Show dismissed tips${d.dismissedTips ? ` (${d.dismissedTips})` : ""}`)}<span class="muted small">Bring back setup tips you dismissed.</span></div>
-      <div class="actrow">${action("/actions/check-updates", "Check for updates")}<span class="muted small">Version ${esc(d.version)}.</span></div>
-      <div class="actrow">${action("/actions/restart", "Restart")}<span class="muted small">${esc(d.service)}</span></div>
+      <div class="actrow">${action("/poll", "↻ Poll now", "Checking…")}<span class="muted small">Check Linear and refresh PR status now.</span></div>
+      <div class="actrow">${action("/actions/reset", "Reset tickets", "Resetting…", "ghost-danger")}<span class="muted small">Clear tickets that haven't been launched and triage everything currently eligible again. Launched tickets are kept.</span></div>
+      <div class="actrow">${action("/actions/recheck", "Re-run setup checks", "Checking…")}<span class="muted small">Refresh the setup tips on the home screen.</span></div>
+      <div class="actrow">${action("/banners/restore", `Show dismissed tips${d.dismissedTips ? ` (${d.dismissedTips})` : ""}`, "Showing…")}<span class="muted small">Bring back setup tips you dismissed.</span></div>
+      <div class="actrow">${action("/actions/check-updates", "Check for updates", "Checking…")}<span class="muted small">Version ${esc(d.version)}.</span></div>
+      <div class="actrow">${action("/actions/restart", "Restart", "Restarting…")}<span class="muted small">${esc(d.service)}</span></div>
       <dl class="facts" style="margin-top:14px"><dt>Config</dt><dd><code>${esc(CONFIG_PATH)}</code></dd>
         <dt>Data</dt><dd><code>${esc(HOME_DIR)}</code></dd><dt>Log</dt><dd><code>${esc(LOG_PATH)}</code></dd></dl>
     </section>`;

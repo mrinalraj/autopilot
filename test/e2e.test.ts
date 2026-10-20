@@ -206,11 +206,10 @@ test("a multi-repo ticket gets a worktree per repo and one session with the othe
   expect(Store.extras(done)[0].worktree_id).toBe("%2Ftmp%2Fwt%2Ffrontend%2Fwidget-everywhere-eng-6%2F");
 
   const calls = readFileSync(scLog, "utf8").slice(before);
-  // Extra repo first and in the background, then the primary, then one tab in the primary.
-  const extraNew = calls.indexOf(`repo worktree-new -r ${supacodeId(join(reposRoot, "frontend"))} --branch widget-everywhere-eng-6 --timeout 300 --background`);
-  const primaryNew = calls.indexOf(`repo worktree-new -r ${supacodeId(join(reposRoot, "backend"))} --branch widget-everywhere-eng-6`);
-  expect(extraNew).toBeGreaterThanOrEqual(0);
-  expect(primaryNew).toBeGreaterThan(extraNew);
+  // A worktree per repo (created in parallel; the extra one in the background), then one tab in the primary.
+  expect(calls).toContain(`repo worktree-new -r ${supacodeId(join(reposRoot, "frontend"))} --branch widget-everywhere-eng-6 --timeout 300 --background`);
+  expect(calls).toContain(`repo worktree-new -r ${supacodeId(join(reposRoot, "backend"))} --branch widget-everywhere-eng-6`);
+  expect(calls.indexOf("tab new")).toBeGreaterThan(calls.lastIndexOf("repo worktree-new"));
   expect(calls).toContain("tab new -w %2Ftmp%2Fwt%2Fbackend%2Fwidget-everywhere-eng-6%2F");
   expect(calls).toContain("the others are frontend at /tmp/wt/frontend/widget-everywhere-eng-6.");
   expect(calls).toMatch(/--add-dir '[^']+briefs' '\/tmp\/wt\/frontend\/widget-everywhere-eng-6'\n/);
@@ -240,6 +239,33 @@ test("delete worktrees refuses to lose work unless forced, then removes them via
   expect(existsSync(wt)).toBe(false);
   expect(Autopilot.work(store.getIssueByIdentifier("ENG-7")!)?.[0].missing).toBe(true);
   expect(await ap.deleteWorktrees("ENG-7", true)).toEqual({ ok: false, error: "the worktrees are already gone" });
+  delete process.env.FAKE_SC_WT_ROOT;
+});
+
+test("send back to approval removes what's left (safely) and lets the ticket be approved again", async () => {
+  const wtRoot = join(dir, "wt2");
+  process.env.FAKE_SC_WT_ROOT = wtRoot;
+  linear.add("again", ME); // ENG-8
+  await ap.poll();
+  ap.approve("ENG-8", "backend", "send me back");
+  await waitFor(() => store.getIssueByIdentifier("ENG-8")!.status !== "approved");
+  const wt = join(wtRoot, "backend", "send-me-back-eng-8");
+  mkdirSync(wt, { recursive: true });
+  Bun.spawnSync(["git", "init", "-q", wt]);
+  writeFileSync(join(wt, "wip.txt"), "unsaved");
+
+  expect((await ap.sendBackToApproval("ENG-8", false)).ok).toBe(false); // would lose work
+  expect(store.getIssueByIdentifier("ENG-8")!.status).toBe("running");
+
+  const res = await ap.sendBackToApproval("ENG-8", true);
+  expect(res).toEqual({ ok: true, message: "ENG-8 is back in Awaiting approval (removed 1 worktree)." });
+  const row = store.getIssueByIdentifier("ENG-8")!;
+  expect([row.status, row.worktree_id, row.launcher, row.work_json, row.branch]).toEqual(["pending", null, null, null, "send-me-back-eng-8"]);
+  expect(existsSync(wt)).toBe(false);
+
+  expect(ap.approve("ENG-8", "backend", row.branch)).toEqual({ ok: true }); // approvable again
+  await waitFor(() => store.getIssueByIdentifier("ENG-8")!.status !== "approved");
+  expect(store.getIssueByIdentifier("ENG-8")!.status).toBe("running");
   delete process.env.FAKE_SC_WT_ROOT;
 });
 

@@ -72,6 +72,10 @@ export interface Config {
     launcher: LauncherName;
     /** Where Claude opens for launchers without their own (worktrunk, git, vscode, cursor); "none" only creates worktrees. */
     terminal: "terminal" | "iterm" | "warp" | "none";
+    /** VS Code / Cursor: open Claude in the editor's chat panel (prompt pre-filled) or in the terminal. */
+    ideSession: "chat" | "terminal";
+    /** Cursor's chat panel: Cursor's own agent, or the Claude Code extension. */
+    cursorChat: "cursor" | "claude";
     /** Where the git, vscode and cursor launchers put worktrees. Default: <reposRoot>/wt */
     worktreesDir: string;
     supacodeBin: string;
@@ -111,6 +115,8 @@ const DEFAULTS: Config = {
   launch: {
     launcher: "supacode",
     terminal: "terminal",
+    ideSession: "chat",
+    cursorChat: "cursor",
     worktreesDir: "",
     supacodeBin: "/Applications/supacode.app/Contents/Resources/bin/supacode",
     claudeBin: "claude",

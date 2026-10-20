@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Config, LauncherName } from "./config";
 import { log } from "./log";
 import { notify } from "./notify";
+import { initPrompt } from "./brief";
+import { step } from "./steps";
 
 /**
  * Launchers create a ticket's worktrees and open its Claude session. Worktrees are identified
@@ -20,6 +22,9 @@ export interface Launcher {
 
 export interface SessionRequest {
   identifier: string;
+  /** The ticket brief, and the extra repos' names, for launchers that build their own prompt (IDE chat). */
+  briefPath: string;
+  others: { repo: string; path: string }[];
   /** Worktree the session starts in (the primary repo's). */
   primaryPath: string;
   /** Extra repos' worktrees, added to the session (and editor workspace). */
@@ -64,6 +69,7 @@ export async function listWorktrees(repoPath: string): Promise<{ path: string; b
   for (const block of out.split("\n\n")) {
     const path = block.match(/^worktree (.+)$/m)?.[1];
     if (!path) continue;
+    if (/^prunable/m.test(block) || !existsSync(path)) continue; // folder deleted by hand; git still lists it
     items.push({ path, branch: block.match(/^branch refs\/heads\/(.+)$/m)?.[1] ?? null });
   }
   return items.slice(1); // the first entry is the repo's main checkout
@@ -79,6 +85,7 @@ export async function worktreeForBranch(repoPath: string, branch: string): Promi
  * Keychain credential helper isn't trusted for github.com, so every launch raised a Keychain prompt.
  */
 async function fetchOrigin(repoPath: string) {
+  step(`Fetching origin in ${basename(repoPath)}…`);
   try {
     await run(["git", "-C", repoPath, "fetch", "origin", "--quiet"], 120_000);
   } catch (err) {
@@ -106,7 +113,7 @@ function supacode(cfg: Config): Launcher {
     async ensureWorktree(repoPath, branch, background) {
       const existing = await worktreeForBranch(repoPath, branch);
       if (existing) {
-        log.info(`reusing existing worktree ${existing}`);
+        step(`Reusing the existing worktree in ${basename(repoPath)}`);
         return existing;
       }
       if (cfg.launch.fetch) await fetchOrigin(repoPath);
@@ -117,6 +124,7 @@ function supacode(cfg: Config): Launcher {
           log.info(`registering ${repoPath} with Supacode`);
           await run([sc, "repo", "open", repoPath], 60_000);
         }
+        step(`Creating the worktree in ${basename(repoPath)} with Supacode (its hooks run now)…`);
         const args = [sc, "repo", "worktree-new", "-r", repoId, "--branch", branch, "--timeout", "300"];
         if (cfg.launch.base) args.push("--base", cfg.launch.base);
         if (background) args.push("--background");
@@ -143,6 +151,7 @@ function supacode(cfg: Config): Launcher {
       const title = `${req.identifier} claude`;
       const id = supacodeId(req.primaryPath);
       if (useCli()) {
+        step("Opening a Claude tab in Supacode…");
         const args = [sc, "tab", "new", "-w", id, "--title", title, "-i", command];
         if (req.background) args.push("--background");
         const tabId = lastLine(await run(args, 60_000));
@@ -171,16 +180,19 @@ async function defaultBase(repoPath: string): Promise<string> {
 async function gitWorktreeAdd(cfg: Config, repoPath: string, branch: string): Promise<string> {
   const existing = await worktreeForBranch(repoPath, branch);
   if (existing) return existing;
+  // Clear entries for worktree folders deleted by hand, or git refuses to check the branch out again.
+  await run(["git", "-C", repoPath, "worktree", "prune"], 30_000).catch(() => {});
   if (cfg.launch.fetch) await fetchOrigin(repoPath);
   const path = join(cfg.launch.worktreesDir, basename(repoPath), branch);
   mkdirSync(dirname(path), { recursive: true });
+  step(`Creating the worktree in ${basename(repoPath)} (git worktree add)…`);
   const branchExists = await run(["git", "-C", repoPath, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], 30_000).then(
     () => true,
     () => false,
   );
   if (branchExists) await run(["git", "-C", repoPath, "worktree", "add", path, branch], 120_000);
   else await run(["git", "-C", repoPath, "worktree", "add", "-b", branch, path, cfg.launch.base || (await defaultBase(repoPath))], 120_000);
-  log.info(`created worktree ${path}`);
+  step(`Worktree ready: ${path}`);
   return path;
 }
 
@@ -201,6 +213,7 @@ async function openTerminal(cfg: Config, req: SessionRequest) {
   }
   const claude = claudeCommand(cfg, req);
   const command = `cd ${shellQuote(req.primaryPath)} && ${claude}`;
+  step(`Opening a ${terminal === "iterm" ? "iTerm" : terminal === "warp" ? "Warp" : "Terminal"} tab with Claude…`);
 
   if (terminal === "warp") {
     // Warp's URI scheme opens a tab in a folder but can't run a command, so the command goes on the
@@ -257,6 +270,7 @@ function worktrunk(cfg: Config): Launcher {
       const existing = await worktreeForBranch(repoPath, branch);
       if (existing) return existing;
       if (cfg.launch.fetch) await fetchOrigin(repoPath);
+      step(`Creating the worktree in ${basename(repoPath)} with Worktrunk (its hooks run now)…`);
       const args = [wt(), "-C", repoPath, "switch", "--create", branch, "--no-cd", "-y"];
       if (cfg.launch.base) args.push("--base", cfg.launch.base);
       await run(args, 330_000);
@@ -280,26 +294,89 @@ function worktrunk(cfg: Config): Launcher {
 
 /* ---------- VS Code / Cursor: git worktrees opened as one workspace, Claude in a terminal ---------- */
 
+/** Chat link that opens the editor's chat panel with `prompt` pre-filled (never auto-sent). */
+export function ideChatUrl(editorName: "vscode" | "cursor", cursorChat: "cursor" | "claude", prompt: string): string {
+  const q = encodeURIComponent(prompt);
+  if (editorName === "cursor" && cursorChat === "cursor") return `cursor://anysphere.cursor-deeplink/prompt?text=${q}`;
+  return `${editorName}://anthropic.claude-code/open?prompt=${q}`;
+}
+
+/** Hidden folder in the primary worktree for the brief and workspace file (excluded from git). */
+export const IDE_DIR = ".linear-autopilot";
+
+/**
+ * Puts the ticket's brief (and, for several repos, a multi-root workspace file) inside the primary
+ * worktree, so trusting the worktrees folder once in the editor covers it: Claude's extension
+ * doesn't run in Restricted Mode, and a workspace is only trusted if every folder in it is.
+ * Returns what to open (folder or workspace file) and the in-worktree brief path.
+ */
+export async function ideWorkspace(req: SessionRequest): Promise<{ target: string; brief: string }> {
+  const dir = join(req.primaryPath, IDE_DIR);
+  mkdirSync(dir, { recursive: true });
+  const brief = join(dir, `${req.identifier}-brief.md`);
+  if (existsSync(brief)) chmodSync(brief, 0o644);
+  copyFileSync(req.briefPath, brief);
+  chmodSync(brief, 0o444);
+  // Keep it out of git status and commits (info/exclude is shared by all worktrees of the repo).
+  const common = await run(["git", "-C", req.primaryPath, "rev-parse", "--git-common-dir"], 30_000).catch(() => "");
+  if (common) {
+    const exclude = join(common.startsWith("/") ? common : join(req.primaryPath, common), "info", "exclude");
+    mkdirSync(dirname(exclude), { recursive: true });
+    const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+    if (!current.split("\n").includes(`${IDE_DIR}/`)) writeFileSync(exclude, `${current}${current && !current.endsWith("\n") ? "\n" : ""}${IDE_DIR}/\n`);
+  }
+  if (!req.otherPaths.length) return { target: req.primaryPath, brief };
+  const target = join(dir, `${req.identifier}.code-workspace`);
+  writeFileSync(target, JSON.stringify({ folders: [req.primaryPath, ...req.otherPaths].map((path) => ({ path })) }, null, 2) + "\n");
+  return { target, brief };
+}
+
+const appRunning = (app: string) => Bun.spawnSync(["pgrep", "-xq", app === "Visual Studio Code" ? "Code" : app]).exitCode === 0;
+
 function editor(cfg: Config, name: "vscode" | "cursor"): Launcher {
   const app = name === "vscode" ? "Visual Studio Code" : "Cursor";
   return {
     name,
     ensureWorktree: (repoPath, branch) => gitWorktreeAdd(cfg, repoPath, branch),
     async openSession(req) {
-      // One repo opens as a folder; several as a multi-root workspace in one window.
-      let target = req.primaryPath;
-      if (req.otherPaths.length) {
-        const dir = join(cfg.stateDir, "workspaces");
-        mkdirSync(dir, { recursive: true });
-        target = join(dir, `${req.identifier}.code-workspace`);
-        writeFileSync(target, JSON.stringify({ folders: [req.primaryPath, ...req.otherPaths].map((path) => ({ path })) }, null, 2) + "\n");
+      if (cfg.launch.ideSession === "terminal") {
+        // One repo opens as a folder; several as a multi-root workspace in one window.
+        let target = req.primaryPath;
+        if (req.otherPaths.length) {
+          const dir = join(cfg.stateDir, "workspaces");
+          mkdirSync(dir, { recursive: true });
+          target = join(dir, `${req.identifier}.code-workspace`);
+          writeFileSync(target, JSON.stringify({ folders: [req.primaryPath, ...req.otherPaths].map((path) => ({ path })) }, null, 2) + "\n");
+        }
+        await run(["open", "-a", app, target], 60_000);
+        await openTerminal(cfg, req);
+        return;
       }
+      // Chat panel: open the workspace, give the window time to appear (longer on a cold start),
+      // then hand the prompt to the chat. The link goes to the focused window, which is this one.
+      const { target, brief } = await ideWorkspace(req);
+      const wasRunning = appRunning(app);
+      step(`Opening ${app}…`);
       await run(["open", "-a", app, target], 60_000);
-      await openTerminal(cfg, req);
+      step(wasRunning ? `Waiting for the ${app} window…` : `Waiting for ${app} to start…`);
+      await Bun.sleep(wasRunning ? 2_500 : 8_000);
+      step(`Sending the prompt to ${name === "cursor" && cfg.launch.cursorChat === "cursor" ? "Cursor's" : "Claude's"} chat…`);
+      await run(["open", ideChatUrl(name, cfg.launch.cursorChat, initPrompt(brief, req.others))], 30_000);
+      log.info(`opened ${app} for ${req.identifier} with the prompt in its chat (press Enter there to start)`);
+      log.info(`If ${app} shows Restricted Mode, trust the folder, then use "Send prompt to chat" on the ticket.`);
     },
     removeWorktree: (repoPath, worktreePath, _branch, force) => gitWorktreeRemove(repoPath, worktreePath, force),
     link: (path) => `${name}://file${encodeURI(path)}`,
   };
+}
+
+/**
+ * Re-sends a launched ticket's prompt to its editor chat (e.g. after trusting the workspace).
+ * Recreates the in-worktree brief first, which also upgrades tickets launched before it existed.
+ */
+export async function resendIdePrompt(cfg: Config, editorName: "vscode" | "cursor", req: SessionRequest) {
+  const { brief } = await ideWorkspace(req);
+  await run(["open", ideChatUrl(editorName, cfg.launch.cursorChat, initPrompt(brief, req.others))], 30_000);
 }
 
 /** The launcher by name; a ticket's stored launcher wins over the configured one. */

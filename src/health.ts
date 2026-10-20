@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import type { Config } from "./config";
 import { notifyState } from "./notify";
 import { ghEnv } from "./work";
@@ -6,8 +6,12 @@ import { ghEnv } from "./work";
 /** Something the setup is missing, shown as a banner on the home screen until it's fixed. */
 export interface SetupItem {
   id: string;
-  /** Required items block core features and can't be dismissed. */
-  level: "required" | "optional";
+  /** Required items block core features and can't be dismissed; hints are small, dismissible suggestions. */
+  level: "required" | "optional" | "hint";
+  /** Optional link shown with the item (e.g. where to get an app). */
+  link?: { href: string; label: string };
+  /** Optional one-click action, posted to this daemon path. */
+  action?: { path: string; label: string; busy: string };
   title: string;
   detail: string;
   command?: string;
@@ -22,6 +26,33 @@ const ok = (argv: string[], env?: Record<string, string | undefined>) => {
     return false;
   }
 };
+
+/**
+ * Whether VS Code/Cursor already trusts `folder` (or a parent), read-only from the editor's own
+ * state database. Best effort: any problem reading it counts as "not trusted".
+ */
+export function editorTrusts(
+  editorName: "vscode" | "cursor",
+  folder: string,
+  db = `${process.env.HOME}/Library/Application Support/${editorName === "vscode" ? "Code" : "Cursor"}/User/globalStorage/state.vscdb`,
+): boolean {
+  if (!existsSync(db)) return false;
+  try {
+    const p = Bun.spawnSync(["sqlite3", "-readonly", db, "select value from ItemTable where key = 'content.trust.model.key';"], { stdout: "pipe", stderr: "ignore" });
+    const raw = p.stdout.toString().trim();
+    if (!raw) return false;
+    const info = (JSON.parse(raw).uriTrustInfo ?? []) as { uri: string | { path?: string; scheme?: string }; trusted: boolean }[];
+    const target = folder.replace(/\/$/, "");
+    return info.some((t) => {
+      if (!t.trusted) return false;
+      const path = typeof t.uri === "string" ? decodeURIComponent(t.uri.replace(/^file:\/\//, "")) : t.uri.path ?? "";
+      const p = path.replace(/\/$/, "");
+      return p !== "" && (target === p || target.startsWith(`${p}/`));
+    });
+  } catch {
+    return false;
+  }
+}
 
 /** Checks the optional and required pieces around the daemon; cheap enough to rerun every few minutes. */
 export class Health {
@@ -64,6 +95,47 @@ export class Health {
         detail: `Claude sessions open in ${termApp[term]} per Settings. Install it, or pick another terminal in Settings.`,
       });
     }
+    // Chat in the editor needs the Claude Code extension there (except Cursor's own chat).
+    const needsExtension =
+      (launcher === "vscode" || (launcher === "cursor" && this.cfg.launch.cursorChat === "claude")) && this.cfg.launch.ideSession === "chat";
+    if (needsExtension) {
+      const dir = `${process.env.HOME}/${launcher === "vscode" ? ".vscode" : ".cursor"}/extensions`;
+      const installed = existsSync(dir) && readdirSync(dir).some((d) => d.startsWith("anthropic.claude-code-"));
+      if (!installed) {
+        const editorName = launcher === "vscode" ? "VS Code" : "Cursor";
+        items.push({
+          id: `claude-extension-${launcher}`,
+          level: "required",
+          title: `Claude Code extension missing in ${editorName}`,
+          detail: `Approved tickets open Claude in ${editorName}'s chat panel, which needs the Claude Code extension. Install it, or set Settings → Launch → "Claude in VS Code/Cursor" to Terminal.`,
+          link: { href: launcher === "vscode" ? "vscode:extension/anthropic.claude-code" : "cursor:extension/anthropic.claude-code", label: `Install in ${editorName}` },
+        });
+      }
+    }
+
+    // Claude's extension is off in Restricted Mode; trusting the worktrees folder once covers every ticket.
+    if ((launcher === "vscode" || launcher === "cursor") && this.cfg.launch.ideSession === "chat" && !editorTrusts(launcher, this.cfg.launch.worktreesDir)) {
+      const editorName = launcher === "vscode" ? "VS Code" : "Cursor";
+      items.push({
+        id: `trust-${launcher}`,
+        level: "optional",
+        title: `Trust your worktrees folder in ${editorName} once`,
+        detail: `${editorName} opens untrusted folders in Restricted Mode, where Claude's extension is off and the prompt can't arrive. Open the folder below, then in ${editorName} click "Manage" in the Restricted Mode bar (or "Restricted Mode" in the status bar) → Trust. If it asks "Do you trust the authors?" instead, click Yes. Every ticket's worktree inside is then covered. A ticket that already opened restricted: trust it, then click "Send prompt to chat" on its card.`,
+        command: this.cfg.launch.worktreesDir,
+        action: { path: `/actions/trust-folder`, label: `Open in ${editorName} to trust it`, busy: "Opening…" },
+      });
+    }
+
+    // Supacode gives the smoothest experience (worktree hooks, a tab per ticket); suggest it gently.
+    if (launcher !== "supacode") {
+      const supacodeInstalled = existsSync(this.cfg.launch.supacodeBin) || app("supacode");
+      items.push(
+        supacodeInstalled
+          ? { id: "supacode-hint", level: "hint", title: "Works best with Supacode", detail: "Supacode is installed: pick it in Settings → Launch for worktree hooks and a Claude tab per ticket." }
+          : { id: "supacode-hint", level: "hint", title: "Works best with Supacode", detail: "Worktree hooks and a Claude tab per ticket, all in one app.", link: { href: "https://supacode.sh", label: "Get Supacode" } },
+      );
+    }
+
     if (this.cfg.repoMode === "list" && this.cfg.repoPaths.length === 0) {
       items.push({ id: "repos-empty", level: "required", title: "No repos selected", detail: "Settings → Repos is set to specific repos, but the list is empty, so tickets can't be routed." });
     }

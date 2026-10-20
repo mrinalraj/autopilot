@@ -169,7 +169,24 @@ backend needs a restart.
 | Supacode (default) | `supacode repo worktree-new` (Supacode's hooks run) | a Supacode tab |
 | Worktrunk | `wt switch --create` (Worktrunk's hooks run) | a new terminal tab |
 | git | `git worktree add` into `<code folder>/wt/<repo>/<branch>` | a new terminal tab |
-| VS Code / Cursor | git, as above; opens the worktree in a new editor window (a multi-root workspace when the ticket spans several repos) | a new terminal tab |
+| VS Code / Cursor | git, as above; opens a new editor window with the ticket's worktrees | the editor's **chat panel** (default) or a new terminal tab |
+
+**Chat panel (VS Code, Cursor):**
+- **Workspace:** the editor opens a workspace with the ticket's worktrees plus a small folder holding
+  only its brief, so Claude can read it without asking.
+- **Prompt:** the chat opens with the init prompt pre-filled; press Enter to start. Neither editor
+  allows auto-sending.
+- **VS Code** uses the Claude Code extension (`vscode://anthropic.claude-code/open`), so the
+  extension must be installed, and a setup tip says so if it isn't.
+- **Cursor** uses Cursor's own chat by default (`cursor://anysphere.cursor-deeplink/prompt`), or the
+  Claude Code extension (`cursor://anthropic.claude-code/open`, which works in practice but isn't
+  documented by Anthropic for Cursor).
+- **Timing:** the prompt goes to the editor's focused window, so avoid switching windows for the
+  couple of seconds while it opens.
+
+When any launcher other than Supacode is selected, a small dismissible **"Works best with
+Supacode"** hint appears. If Supacode is installed it suggests switching; otherwise it links to
+[supacode.sh](https://supacode.sh).
 
 Terminal tabs start in the primary worktree:
 

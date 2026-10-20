@@ -84,6 +84,8 @@ export function saveSettings(cfg: Config, form: FormData, path = CONFIG_PATH): S
     fetch: form.get("fetch") === "on",
     base: String(form.get("base") ?? "").trim(),
     background: form.get("background") === "on",
+    ideSession: form.get("ideSession") === "terminal" ? "terminal" : "chat",
+    cursorChat: form.get("cursorChat") === "claude" ? "claude" : "cursor",
   };
 
   // Repo catalog: descriptions that differ from the derived ones, and exclusions.
