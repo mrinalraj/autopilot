@@ -18,7 +18,7 @@ export const ICONS: Record<string, string> = {
 };
 
 export const MANIFEST = {
-  "name": "Linear autopilot",
+  "name": "Autopilot",
   "short_name": "Autopilot",
   "description": "Approve Linear tickets and launch Claude Code sessions in Supacode worktrees.",
   "id": "/",
@@ -57,7 +57,7 @@ export const MANIFEST = {
 
 // Network-only for everything (ticket data and CSRF tokens must never be stale). The one thing it
 // adds is an offline page when the daemon isn't running, so the installed app explains itself.
-export const SERVICE_WORKER = `const CACHE = "autopilot-v3";
+export const SERVICE_WORKER = `const CACHE = "autopilot-v4";
 const OFFLINE = "/offline.html";
 
 self.addEventListener("install", (event) => {
@@ -86,7 +86,7 @@ export const offlinePage = (port: number, logPath: string) => `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="10;url=/">
-<title>Linear autopilot · offline</title>
+<title>Autopilot · offline</title>
 <style>
   :root { --bg:#f4f4f1; --panel:#fff; --text:#1b1b19; --muted:#6d6d67; --border:#e4e4de; --code:#efefea; }
   @media (prefers-color-scheme: dark) { :root { --bg:#0f0f0e; --panel:#191917; --text:#ededea; --muted:#9b9b94; --border:#2a2a27; --code:#262624; } }
@@ -103,11 +103,11 @@ export const offlinePage = (port: number, logPath: string) => `<!doctype html>
 <body>
   <div class="box">
     <img src="/icons/icon.svg" alt="">
-    <h1>linear-autopilot isn't running</h1>
+    <h1>autopilot isn't running</h1>
     <p>The local daemon behind this app isn't answering on port ${port}. Restart it with:</p>
-    <code>linear-autopilot service restart</code>
+    <code>autopilot service restart</code>
     <p>Logs: <code>${logPath}</code></p>
-    ${port !== 4747 ? `<p><strong>Installed from a different port?</strong> An installed app is tied to the address it was installed from. If linear-autopilot now runs on its default port, <a href="http://localhost:4747/">open http://localhost:4747</a> and install the app from there.</p>` : ""}
+    ${port !== 4747 ? `<p><strong>Installed from a different port?</strong> An installed app is tied to the address it was installed from. If autopilot now runs on its default port, <a href="http://localhost:4747/">open http://localhost:4747</a> and install the app from there.</p>` : ""}
     <p>This page retries every 10 seconds.</p>
   </div>
 </body>

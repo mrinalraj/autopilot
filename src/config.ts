@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -16,18 +16,37 @@ export const COMPILED = import.meta.url.includes("$bunfs") || import.meta.dir.in
 export const HOME_DIR = process.env.AUTOPILOT_HOME
   ? expandHome(process.env.AUTOPILOT_HOME)
   : COMPILED
-    ? join(homedir(), "Library", "Application Support", "linear-autopilot")
+    ? appSupport()
     : resolve(import.meta.dir, "..");
+
+/** Application Support folder; moves the one from when the app was called linear-autopilot. */
+function appSupport(): string {
+  const dir = join(homedir(), "Library", "Application Support", "autopilot");
+  const legacy = join(homedir(), "Library", "Application Support", "linear-autopilot");
+  if (!existsSync(dir) && existsSync(legacy)) renameSync(legacy, dir);
+  return dir;
+}
 
 export const CONFIG_PATH = process.env.AUTOPILOT_CONFIG ?? join(HOME_DIR, "config.json");
 /** Homebrew prefix when running from a Homebrew install (its `brew services` logs to var/log). */
 const BREW_PREFIX = COMPILED ? process.execPath.match(/^(.*)\/Cellar\//)?.[1] ?? null : null;
-export const LOG_PATH = BREW_PREFIX ? join(BREW_PREFIX, "var", "log", "linear-autopilot.log") : join(HOME_DIR, "logs", "autopilot.log");
+export const LOG_PATH = BREW_PREFIX ? join(BREW_PREFIX, "var", "log", "autopilot.log") : join(HOME_DIR, "logs", "autopilot.log");
+
+import { TRACKER_KINDS, TRACKERS, type TrackerKind } from "./tracker";
 
 export const LAUNCHERS = ["supacode", "worktrunk", "git", "vscode", "cursor"] as const;
 export type LauncherName = (typeof LAUNCHERS)[number];
 
 export interface Config {
+  /** Which tracker to watch; each keeps its own state under stateDir. */
+  tracker: TrackerKind;
+  jira: {
+    /** Site to use when the account can reach several, by URL or name (e.g. acme.atlassian.net). Empty = the first. */
+    site: string;
+    /** Jira's own pickupStates / importStates (status names differ between trackers). */
+    pickupStates?: string[];
+    importStates?: string[];
+  };
   pollIntervalSeconds: number;
   /** How often launched items are checked for commits and PRs (local git + gh). */
   workCheckIntervalSeconds: number;
@@ -40,6 +59,7 @@ export interface Config {
   repoPaths: string[];
   /** Ticket prefixes (ENG, IT, …) recognised in branch and worktree names. Empty = my Linear teams' keys. */
   ticketPrefixes: string[];
+  /** Default: <home>/state for Linear, <home>/state/jira for Jira, so their tickets never mix. */
   stateDir: string;
   /** Read-only ticket briefs rendered from the DB for the Claude session. Default: <stateDir>/briefs */
   briefsDir: string;
@@ -89,6 +109,8 @@ export interface Config {
 }
 
 const DEFAULTS: Config = {
+  tracker: "linear",
+  jira: { site: "" },
   pollIntervalSeconds: 1200,
   workCheckIntervalSeconds: 300,
   port: COMPILED ? 4747 : 4800, // from source, stay clear of the installed app
@@ -97,7 +119,7 @@ const DEFAULTS: Config = {
   reposRoot: join(homedir(), "code"),
   repoPaths: [],
   ticketPrefixes: [],
-  stateDir: join(HOME_DIR, "state"),
+  stateDir: "",
   briefsDir: "",
   githubUser: "",
   linearUserId: "",
@@ -132,6 +154,7 @@ export function loadConfig(path = CONFIG_PATH): Config {
   const cfg: Config = {
     ...DEFAULTS,
     ...user,
+    jira: { ...DEFAULTS.jira, ...user.jira },
     llm: { ...DEFAULTS.llm, ...user.llm },
     launch: { ...DEFAULTS.launch, ...user.launch },
     repos: { ...DEFAULTS.repos, ...user.repos },
@@ -140,7 +163,12 @@ export function loadConfig(path = CONFIG_PATH): Config {
   cfg.repoPaths = (cfg.repoPaths ?? []).map(expandHome);
   if (cfg.repoMode !== "list") cfg.repoMode = "folder";
   cfg.ticketPrefixes = (cfg.ticketPrefixes ?? []).map((p) => p.trim().toUpperCase()).filter(Boolean);
-  cfg.stateDir = expandHome(cfg.stateDir);
+  if (!TRACKER_KINDS.includes(cfg.tracker)) cfg.tracker = "linear";
+  if (cfg.tracker === "jira") {
+    cfg.pickupStates = cfg.jira.pickupStates ?? DEFAULTS.pickupStates;
+    cfg.importStates = cfg.jira.importStates ?? DEFAULTS.importStates;
+  }
+  cfg.stateDir = cfg.stateDir ? expandHome(cfg.stateDir) : join(HOME_DIR, "state", ...(cfg.tracker === "jira" ? ["jira"] : []));
   cfg.briefsDir = cfg.briefsDir ? expandHome(cfg.briefsDir) : join(cfg.stateDir, "briefs");
   cfg.launch.worktreesDir = cfg.launch.worktreesDir
     ? expandHome(cfg.launch.worktreesDir)
@@ -154,4 +182,4 @@ export function baseUrl(cfg: Config): string {
 }
 
 export const oauthRedirectUrl = (cfg: Config) => `http://127.0.0.1:${cfg.oauthCallbackPort}/callback`;
-export const oauthScope = (cfg: Config) => (cfg.moveToInProgressOnApprove ? "read write" : "read");
+export const oauthScope = (cfg: Config) => TRACKERS[cfg.tracker].scope(cfg);

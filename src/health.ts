@@ -179,7 +179,7 @@ export class Health {
         level: "optional",
         title: "Notifications are blocked for terminal-notifier",
         detail: "Run this once and click Allow, or enable it in System Settings → Notifications → terminal-notifier.",
-        command: "terminal-notifier -title linear-autopilot -message test",
+        command: "terminal-notifier -title autopilot -message test",
       });
     }
 

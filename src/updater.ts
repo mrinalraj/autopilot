@@ -38,7 +38,7 @@ export class Updater {
           setTimeout(() => process.exit(0), 500);
         } else {
           this.status = "error";
-          this.error = `Installed ${this.info!.latest}; restart linear-autopilot to use it.`;
+          this.error = `Installed ${this.info!.latest}; restart autopilot to use it.`;
         }
       })
       .catch((err) => {

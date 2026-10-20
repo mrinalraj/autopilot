@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
-import { loadConfig, oauthRedirectUrl, oauthScope } from "./config";
+import { loadConfig } from "./config";
 import { Store } from "./db";
-import { KeychainOAuthProvider, LinearClient, LoginRequiredError } from "./linear";
+import { openTracker } from "./connect";
 import { createLLM } from "./llm";
 import { Autopilot } from "./autopilot";
 import { startWeb } from "./web";
@@ -17,10 +17,8 @@ export async function runDaemon(opts: { once?: boolean } = {}) {
   await prepareSecrets(cfg);
 
   // The daemon never opens a browser; a missing or revoked login surfaces as a poll error.
-  const provider = new KeychainOAuthProvider(oauthRedirectUrl(cfg), oauthScope(cfg), () => {
-    throw new LoginRequiredError();
-  });
-  const ap = new Autopilot(cfg, new Store(cfg.stateDir), new LinearClient(provider), createLLM(cfg));
+  const { tracker } = openTracker(cfg);
+  const ap = new Autopilot(cfg, new Store(cfg.stateDir), tracker, createLLM(cfg));
 
   if (opts.once) {
     await ap.poll();
@@ -45,12 +43,12 @@ export async function runDaemon(opts: { once?: boolean } = {}) {
     startWeb(ap, { updater, health, reschedule });
   } catch (err) {
     if ((err as { code?: string }).code === "EADDRINUSE") {
-      log.error(`port ${cfg.port} is already in use; is another linear-autopilot running? (try: linear-autopilot service status)`);
+      log.error(`port ${cfg.port} is already in use; is another autopilot running? (try: autopilot service status)`);
       process.exit(1);
     }
     throw err;
   }
-  log.info(`polling Linear every ${cfg.pollIntervalSeconds}s; repos under ${cfg.reposRoot}; llm ${cfg.llm.provider}/${cfg.llm.model}`);
+  log.info(`polling ${tracker.label} every ${cfg.pollIntervalSeconds}s; repos under ${cfg.reposRoot}; llm ${cfg.llm.provider}/${cfg.llm.model}`);
   reschedule();
   await ap.poll();
   void ap.refreshWork();

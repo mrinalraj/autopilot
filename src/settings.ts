@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { CONFIG_PATH, expandHome, LAUNCHERS, loadConfig, type Config, type LauncherName } from "./config";
 import { listRepos } from "./catalog";
+import { TRACKER_KINDS, type TrackerKind } from "./tracker";
 
 /** gh accounts logged in on this machine (for the PR-tracking account picker). */
 export function githubAccounts(): string[] {
@@ -63,8 +64,10 @@ export function saveSettings(cfg: Config, form: FormData, path = CONFIG_PATH): S
   const raw: Record<string, any> = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
   const before = { provider: cfg.llm.provider, move: cfg.moveToInProgressOnApprove };
 
-  raw.pickupStates = list(form, "pickupStates", "pickupStatesOther");
-  raw.importStates = list(form, "importStates", "importStatesOther");
+  // Each tracker keeps its own statuses; Linear's live at the top level for older configs.
+  const states = { pickupStates: list(form, "pickupStates", "pickupStatesOther"), importStates: list(form, "importStates", "importStatesOther") };
+  if (cfg.tracker === "jira") raw.jira = { ...raw.jira, ...states };
+  else Object.assign(raw, states);
   raw.importWorktrees = form.get("importWorktrees") === "on";
   raw.pollIntervalSeconds = Math.round(pollMinutes * 60);
   raw.workCheckIntervalSeconds = Math.round(workMinutes * 60);
@@ -103,8 +106,24 @@ export function saveSettings(cfg: Config, form: FormData, path = CONFIG_PATH): S
   Object.assign(cfg, loadConfig(path));
 
   if (provider !== before.provider) notes.push("The LLM backend changes after a restart.");
-  if (raw.moveToInProgressOnApprove && !before.move) {
-    notes.push("Moving tickets to In Progress needs Linear write access: run `linear-autopilot login --force` once.");
+  if (raw.moveToInProgressOnApprove && !before.move && cfg.tracker === "linear") {
+    notes.push("Moving tickets to In Progress needs Linear write access: sign in again (Switch account) once.");
   }
   return { errors, notes };
+}
+
+/**
+ * Saves the tracker choice (and Jira site) without touching the running config: the store, briefs
+ * and connection belong to the old tracker until the daemon restarts.
+ */
+export function saveTracker(form: FormData, path = CONFIG_PATH): { ok: true; tracker: TrackerKind } | { ok: false; error: string } {
+  const tracker = String(form.get("tracker") ?? "") as TrackerKind;
+  if (!TRACKER_KINDS.includes(tracker)) return { ok: false, error: "Pick Linear or Jira." };
+  const site = String(form.get("jiraSite") ?? "").trim();
+  if (site && !/^[\w.-]+(\.[\w.-]+)*(\/.*)?$/.test(site.replace(/^https?:\/\//, ""))) return { ok: false, error: `"${site}" doesn't look like a Jira site.` };
+  const raw: Record<string, any> = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+  raw.tracker = tracker;
+  if (form.has("jiraSite")) raw.jira = { ...raw.jira, site };
+  writeFileSync(path, JSON.stringify(raw, null, 2) + "\n");
+  return { ok: true, tracker };
 }

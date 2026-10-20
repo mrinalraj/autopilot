@@ -1,6 +1,7 @@
+import { mkdirSync } from "node:fs";
 import { baseUrl, type Config } from "./config";
 import { MAX_ATTEMPTS, Store, type ExtraRepo, type IssueRow } from "./db";
-import { CLOSED_STATE_TYPES, LinearClient, LoginRequiredError, type LinearIssue } from "./linear";
+import { CLOSED_STATE_TYPES, LoginRequiredError, type Tracker, type TrackerIssue } from "./tracker";
 import type { LLM } from "./llm";
 import { loadCatalog, type RepoEntry } from "./catalog";
 import { explain, resolveRepo, type Explainer } from "./triage";
@@ -15,14 +16,14 @@ import { atRisk, checkWork, isSettled, overallStage, workFingerprint, type RepoW
 import { log } from "./log";
 
 export const CURSOR_KEY = "poll_cursor";
-/** Re-read a window before the cursor to absorb clock skew between us and Linear. */
+/** Re-read a window before the cursor to absorb clock skew between us and the tracker. */
 const CURSOR_OVERLAP_MS = 5 * 60_000;
 
 export type Phase = "in-progress" | "in-review" | "completed";
 
 /**
- * Where a launched or imported ticket stands: completed when Linear says done/canceled or every
- * touched repo's PR is merged/closed; in review when Linear's status says review or a PR is open.
+ * Where a launched or imported ticket stands: completed when the tracker says done/canceled or every
+ * touched repo's PR is merged/closed; in review when its status says review or a PR is open.
  */
 export function phaseOf(row: IssueRow, work: RepoWork[] | null): Phase {
   if (["completed", "canceled", "duplicate"].includes(row.linear_state_type ?? "")) return "completed";
@@ -49,14 +50,52 @@ export class Autopilot {
 
   constructor(
     readonly cfg: Config,
-    readonly store: Store,
-    private readonly linear: LinearClient,
+    public store: Store,
+    private tracker: Tracker,
     private readonly llm: LLM,
   ) {
-    // A launch can't survive a restart; surface it so it can be retried.
-    for (const row of store.listByStatus(["approved"])) {
-      store.updateIssue(row.linear_id, { status: "failed", error: "daemon restarted during launch; approve again to retry" });
+    this.recoverLaunches();
+  }
+
+  /** A launch can't survive a restart; surface it so it can be retried. */
+  private recoverLaunches() {
+    for (const row of this.store.listByStatus(["approved"])) {
+      this.store.updateIssue(row.linear_id, { status: "failed", error: "daemon restarted during launch; approve again to retry" });
     }
+  }
+
+  /** True before this tracker has ever produced a ticket (a fresh install, or a tracker never used). */
+  isEmpty(): boolean {
+    return this.store.listByStatus(["pending", "approved", "running", "failed", "rejected"], 1).length === 0;
+  }
+
+  /**
+   * Moves to the tracker now in `cfg` (already reloaded): its own store, briefs and sign-in. Refused
+   * mid-check or mid-launch, which still belong to the old one.
+   */
+  async switchTracker(open: () => Tracker): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.polling || this.checkingWork || launchSteps.size || this.signingIn) {
+      return { ok: false, error: "busy with a check, launch or sign-in; try again in a moment" };
+    }
+    const next = open();
+    await this.tracker.close();
+    this.store.db.close();
+    mkdirSync(this.cfg.briefsDir, { recursive: true });
+    this.tracker = next;
+    this.store = new Store(this.cfg.stateDir);
+    this.recoverLaunches();
+    this.me = null;
+    this.statusCache = null;
+    this.lastPollAt = null;
+    this.lastPollError = null;
+    this.notes.clear();
+    log.info(`now watching ${this.trackerLabel}`);
+    return { ok: true };
+  }
+
+  /** "Linear" or "Jira", for messages and the page. */
+  get trackerLabel(): string {
+    return this.tracker.label ?? "Linear";
   }
 
   catalog(): RepoEntry[] {
@@ -64,7 +103,7 @@ export class Autopilot {
   }
 
   private async userId(): Promise<string> {
-    this.me ??= this.cfg.linearUserId || (await this.linear.viewer()).id;
+    this.me ??= (this.cfg.tracker === "linear" && this.cfg.linearUserId) || (await this.tracker.viewer()).id;
     return this.me;
   }
 
@@ -87,7 +126,7 @@ export class Autopilot {
   activity(): string | null {
     const job = [...launchSteps.entries()][0];
     if (job) return `${job[0]}: ${job[1]}`;
-    if (this.polling) return "Checking Linear for new tickets…";
+    if (this.polling) return `Checking ${this.trackerLabel} for new tickets…`;
     if (this.checkingWork) return "Refreshing commits and PR status…";
     return null;
   }
@@ -102,7 +141,7 @@ export class Autopilot {
       const rows = only ? [this.store.getIssue(only)].filter((r): r is IssueRow => !!r) : this.store.listByStatus(["running"], 200);
       for (const row of rows) {
         if (!row.worktree_id) {
-          await this.refreshLinearState(row); // imported without a worktree: Linear status only
+          await this.refreshLinearState(row); // imported without a worktree: tracker status only
           continue;
         }
         const prev = Autopilot.work(row);
@@ -134,37 +173,37 @@ export class Autopilot {
   /** Per-repo work, primary first. Rows checked before multi-repo support stored a single object. */
   private statusCache: { at: number; options: { team: string; name: string; type: string }[] } | null = null;
 
-  /** My Linear teams' keys (the default ticket prefixes); empty if Linear is unreachable. */
+  /** My teams' (Jira: projects') keys, the default ticket prefixes; empty if the tracker is unreachable. */
   async teamKeys(): Promise<string[]> {
     try {
-      return (await this.linear.me()).teams.map((t) => t.key);
+      return (await this.tracker.me()).teams.map((t) => t.key);
     } catch {
       return [];
     }
   }
 
-  /** My teams' workflow statuses for the settings pickers (cached 10 minutes; empty if Linear is unreachable). */
+  /** Workflow statuses for the settings pickers (cached 10 minutes; empty if the tracker is unreachable). */
   async statusOptions(): Promise<{ team: string; name: string; type: string }[]> {
     if (!this.statusCache || Date.now() - this.statusCache.at > 600_000) {
       try {
-        this.statusCache = { at: Date.now(), options: await this.linear.teamStatuses() };
+        this.statusCache = { at: Date.now(), options: await this.tracker.teamStatuses() };
       } catch (err) {
-        log.warn("could not load Linear statuses", err);
+        log.warn(`could not load ${this.trackerLabel} statuses`, err);
         return this.statusCache?.options ?? [];
       }
     }
     return this.statusCache.options;
   }
 
-  /** Keeps a tracked ticket's Linear status current (it drives the In review / Completed grouping). */
+  /** Keeps a tracked ticket's tracker status current (it drives the In review / Completed grouping). */
   private async refreshLinearState(row: IssueRow) {
     try {
-      const s = await this.linear.issueState(row.linear_id);
+      const s = await this.tracker.issueState(row.linear_id);
       if (s && (s.name !== row.linear_state || s.type !== row.linear_state_type)) {
         this.store.updateIssue(row.linear_id, { linear_state: s.name, linear_state_type: s.type });
       }
     } catch (err) {
-      log.warn(`could not refresh Linear status for ${row.identifier}`, err);
+      log.warn(`could not refresh ${this.trackerLabel} status for ${row.identifier}`, err);
     }
   }
 
@@ -174,21 +213,21 @@ export class Autopilot {
    * tracked like launched ones. Tickets that already have a row are left alone.
    */
   async importExisting(): Promise<string[]> {
-    const me = await this.linear.me();
+    const me = await this.tracker.me();
     const prefixes = this.cfg.ticketPrefixes.length ? this.cfg.ticketPrefixes : me.teams.map((t) => t.key);
     const found = this.cfg.importWorktrees ? await scanWorktrees(this.catalog(), prefixes) : new Map<string, FoundWorktree[]>();
     const wanted = new Set(found.keys());
-    if (this.cfg.importStates.length) for (const r of await this.linear.mineInStates(this.cfg.importStates)) wanted.add(r.identifier);
+    if (this.cfg.importStates.length) for (const r of await this.tracker.mineInStates(this.cfg.importStates)) wanted.add(r.identifier);
 
     const supacodePaths = await supacodeWorktreePaths(this.cfg);
     const imported: string[] = [];
     for (const identifier of wanted) {
       if (this.store.getIssueByIdentifier(identifier)) continue;
-      const issue = await this.linear.issue(identifier);
+      const issue = await this.tracker.issue(identifier);
       if (!issue || this.store.getIssue(issue.id)) continue;
       const wts = found.get(identifier) ?? [];
       const [primary, ...others] = wts;
-      const snapshotJson = JSON.stringify(snapshot(issue));
+      const snapshotJson = JSON.stringify(snapshot(issue, this.trackerLabel));
       const summary = (issue.description ?? "").replace(/\s+/g, " ").trim().slice(0, 280);
       this.store.upsertIssue({
         linear_id: issue.id,
@@ -200,7 +239,7 @@ export class Autopilot {
         repo_path: primary?.repoPath ?? "",
         branch: primary?.branch ?? issue.gitBranchName ?? issue.identifier.toLowerCase(),
         confidence: 1,
-        resolve_reason: wts.length ? `Imported from existing worktree${wts.length > 1 ? "s" : ""}` : `Imported from Linear (${issue.state.name}); no worktree found`,
+        resolve_reason: wts.length ? `Imported from existing worktree${wts.length > 1 ? "s" : ""}` : `Imported from ${this.trackerLabel} (${issue.state.name}); no worktree found`,
         status: "running",
         error: null,
         worktree_id: primary ? supacodeId(primary.path) : null,
@@ -236,7 +275,7 @@ export class Autopilot {
     this.polling = true;
     const started = Date.now();
     try {
-      log.info("Checking Linear for tickets…");
+      log.info(`Checking ${this.trackerLabel} for tickets…`);
       await this.detectAssignments();
       const queued = this.store.unhandled().length;
       await this.processQueue();
@@ -244,12 +283,12 @@ export class Autopilot {
         log.warn("import of existing work failed", err);
         return [] as string[];
       });
-      log.info(`Linear check done in ${((Date.now() - started) / 1000).toFixed(1)}s: ${queued} to triage, ${imported.length} imported`);
+      log.info(`${this.trackerLabel} check done in ${((Date.now() - started) / 1000).toFixed(1)}s: ${queued} to triage, ${imported.length} imported`);
       this.lastPollError = null;
     } catch (err) {
       const msg = (err as Error).message;
       if (err instanceof LoginRequiredError && this.lastPollError !== msg) {
-        await notify({ title: "Linear autopilot: login needed", message: msg, openUrl: baseUrl(this.cfg), group: "login" });
+        await notify({ title: `Autopilot: ${this.trackerLabel} login needed`, message: msg, openUrl: baseUrl(this.cfg), group: "login" });
       }
       this.lastPollError = msg;
       log.error("poll failed", err);
@@ -267,7 +306,7 @@ export class Autopilot {
     if (!cursor) {
       // First run: baseline what's already eligible so the backlog doesn't flood the queue.
       const eligibleIds = new Set<string>();
-      for (const ref of await this.linear.assignedToMe()) {
+      for (const ref of await this.tracker.assignedToMe()) {
         if (!this.eligible(ref.assigneeId, ref.stateName, ref.stateType, me)) continue;
         eligibleIds.add(ref.id);
         this.store.markAssigned(ref.id, ref.identifier, !this.cfg.processExistingOnFirstRun);
@@ -275,13 +314,14 @@ export class Autopilot {
       for (const row of this.store.listByStatus(["pending"])) {
         if (!eligibleIds.has(row.linear_id)) this.dismissIfPending(row.linear_id, `not assigned to me in ${this.pickupLabel()}`);
       }
-      log.info(`first run: baselined ${eligibleIds.size} tickets already assigned to me in ${this.pickupLabel()}`);
+      const verb = this.cfg.processExistingOnFirstRun ? "queued" : "baselined";
+      log.info(`first run: ${verb} ${eligibleIds.size} tickets already assigned to me in ${this.pickupLabel()}`);
       this.store.setMeta(CURSOR_KEY, startedAt);
       return;
     }
 
     const since = new Date(Date.parse(cursor) - CURSOR_OVERLAP_MS).toISOString();
-    for (const ref of await this.linear.updatedSince(since)) {
+    for (const ref of await this.tracker.updatedSince(since)) {
       const seen = this.store.getAssignment(ref.id);
       if (this.eligible(ref.assigneeId, ref.stateName, ref.stateType, me)) {
         if (seen?.assigned) continue;
@@ -307,7 +347,7 @@ export class Autopilot {
     for (const pending of queue) {
       this.progress.current = pending.identifier;
       try {
-        const issue = await this.linear.issue(pending.linear_id);
+        const issue = await this.tracker.issue(pending.linear_id);
         if (!issue || !this.eligible(issue.assigneeId, issue.state.name, issue.state.type, me)) {
           this.store.markUnassigned(pending.linear_id);
           continue;
@@ -339,7 +379,7 @@ export class Autopilot {
     this.progress = { current: null, done: 0, total: 0 };
   }
 
-  private async triage(issue: LinearIssue) {
+  private async triage(issue: TrackerIssue) {
     const catalog = this.catalog();
     if (catalog.length === 0) throw new Error(`no git repos found under ${this.cfg.reposRoot}`);
 
@@ -362,7 +402,7 @@ export class Autopilot {
       status: "pending",
       error: null,
       worktree_id: null,
-      ticket_json: JSON.stringify(snapshot(issue)),
+      ticket_json: JSON.stringify(snapshot(issue, this.trackerLabel)),
       explainer_json: JSON.stringify(explainer),
       extra_repos_json: JSON.stringify(resolution.extra.map((e): ExtraRepo => ({ ...e, worktree_id: null }))),
     });
@@ -450,7 +490,7 @@ export class Autopilot {
       void this.refreshWork();
       if (this.cfg.moveToInProgressOnApprove) {
         try {
-          log.info(`${row.identifier} moved to "${await this.linear.moveToStarted(row.identifier)}"`);
+          log.info(`${row.identifier} moved to "${await this.tracker.moveToStarted(row.identifier)}"`);
         } catch (err) {
           log.warn(`could not move ${row.identifier} to In Progress`, err);
         }
@@ -563,10 +603,10 @@ export class Autopilot {
     return { ok: true, message: `${identifier} is back in Awaiting approval${live.length ? ` (removed ${live.length} worktree${live.length === 1 ? "" : "s"})` : ""}.` };
   }
 
-  /** Who's signed in to Linear, or null when signed out (or the login was revoked). */
+  /** Who's signed in to the tracker, or null when signed out (or the login was revoked). */
   async account(): Promise<{ name: string; email: string | null } | null> {
     try {
-      const me = await this.linear.me();
+      const me = await this.tracker.me();
       return { name: me.name, email: me.email };
     } catch (err) {
       if (err instanceof LoginRequiredError) return null;
@@ -583,28 +623,28 @@ export class Autopilot {
   startSignIn(): { ok: true } | { ok: false; error: string } {
     if (this.signingIn) return { ok: false, error: "a sign-in is already waiting in your browser" };
     this.signingIn = true;
-    log.info("Opening Linear in your browser to sign in…");
+    log.info(`Opening ${this.trackerLabel} in your browser to sign in…`);
     void browserLogin(this.cfg, { force: true })
       .then(async (me) => {
-        log.info(`Signed in to Linear as ${me.name}${me.email ? ` <${me.email}>` : ""}`);
+        log.info(`Signed in to ${this.trackerLabel} as ${me.name}${me.email ? ` <${me.email}>` : ""}`);
         await this.afterAuthChange();
         void this.poll();
       })
-      .catch((err) => log.warn("Linear sign-in didn't complete", err))
+      .catch((err) => log.warn(`${this.trackerLabel} sign-in didn't complete`, err))
       .finally(() => (this.signingIn = false));
     return { ok: true };
   }
 
-  async signOutOfLinear() {
+  async signOut() {
     await signOut(this.cfg);
     await this.afterAuthChange();
-    this.lastPollError = new LoginRequiredError().message;
-    log.info("Signed out of Linear; polling stops until you sign in again");
+    this.lastPollError = new LoginRequiredError(this.trackerLabel).message;
+    log.info(`Signed out of ${this.trackerLabel}; polling stops until you sign in again`);
   }
 
   /** Forget everything cached about the previous account. */
   private async afterAuthChange() {
-    await this.linear.resetAuth();
+    await this.tracker.resetAuth();
     this.me = null;
     this.statusCache = null;
   }

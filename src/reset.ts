@@ -1,7 +1,7 @@
 import { rmSync } from "node:fs";
-import { loadConfig, oauthRedirectUrl, oauthScope } from "./config";
+import { loadConfig } from "./config";
 import { Store } from "./db";
-import { KeychainOAuthProvider, LinearClient, LoginRequiredError } from "./linear";
+import { openTracker } from "./connect";
 import { CURSOR_KEY, isEligible } from "./autopilot";
 
 /**
@@ -18,11 +18,9 @@ export interface ResetSummary {
 export async function resetTickets(): Promise<ResetSummary> {
   const cfg = loadConfig();
   const store = new Store(cfg.stateDir);
-  const linear = new LinearClient(new KeychainOAuthProvider(oauthRedirectUrl(cfg), oauthScope(cfg), () => {
-    throw new LoginRequiredError();
-  }));
+  const { tracker: linear } = openTracker(cfg);
   try {
-    const me = cfg.linearUserId || (await linear.viewer()).id;
+    const me = (cfg.tracker === "linear" && cfg.linearUserId) || (await linear.viewer()).id;
     const eligible = (await linear.assignedToMe()).filter((r) => isEligible(cfg, r.assigneeId, r.stateName, r.stateType, me));
 
     const kept = store.listByStatus(["approved", "running"], 1000);

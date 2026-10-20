@@ -27,15 +27,15 @@ test("IDE brief lives inside the primary worktree (git-ignored); several repos g
 
   const single = await ideWorkspace(req);
   expect(single.target).toBe(repo); // one repo: open the folder itself
-  expect(single.brief).toBe(join(repo, ".linear-autopilot", "ENG-1-brief.md"));
+  expect(single.brief).toBe(join(repo, ".autopilot", "ENG-1-brief.md"));
   expect(readFileSync(single.brief, "utf8")).toBe("# brief");
   expect(statSync(single.brief).mode & 0o222).toBe(0);
   expect(Bun.spawnSync(["git", "-C", repo, "status", "--porcelain"]).stdout.toString()).toBe(""); // excluded from git
 
   const multi = await ideWorkspace({ ...req, others: [{ repo: "web", path: "/wt/web/x" }], otherPaths: ["/wt/web/x"] });
-  expect(multi.target).toBe(join(repo, ".linear-autopilot", "ENG-1.code-workspace"));
+  expect(multi.target).toBe(join(repo, ".autopilot", "ENG-1.code-workspace"));
   expect(JSON.parse(readFileSync(multi.target, "utf8")).folders).toEqual([{ path: repo }, { path: "/wt/web/x" }]);
-  expect(readFileSync(join(repo, ".git", "info", "exclude"), "utf8").split("\n").filter((l) => l === ".linear-autopilot/")).toHaveLength(1);
+  expect(readFileSync(join(repo, ".git", "info", "exclude"), "utf8").split("\n").filter((l) => l === ".autopilot/")).toHaveLength(1);
 });
 
 test("non-Supacode launchers get a small, dismissible 'works best with Supacode' hint", async () => {

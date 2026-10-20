@@ -302,7 +302,7 @@ export function ideChatUrl(editorName: "vscode" | "cursor", cursorChat: "cursor"
 }
 
 /** Hidden folder in the primary worktree for the brief and workspace file (excluded from git). */
-export const IDE_DIR = ".linear-autopilot";
+export const IDE_DIR = ".autopilot";
 
 /**
  * Puts the ticket's brief (and, for several repos, a multi-root workspace file) inside the primary

@@ -7,7 +7,7 @@ import { Store } from "../src/db";
 import { Autopilot, phaseOf } from "../src/autopilot";
 import { ticketIdFrom } from "../src/importer";
 import { launcherFor } from "../src/launch";
-import type { LinearClient, LinearIssue } from "../src/linear";
+import type { Tracker, TrackerIssue as LinearIssue } from "../src/tracker";
 import type { LLM } from "../src/llm";
 
 const dir = realpathSync(mkdtempSync(join(tmpdir(), "autopilot-import-")));
@@ -52,7 +52,7 @@ beforeAll(() => {
     launch: { ...base.launch, supacodeBin: "/nonexistent", fetch: false, base: "main", terminal: "none", worktreesDir: join(dir, "made") },
   };
   store = new Store(cfg.stateDir);
-  ap = new Autopilot(cfg, store, linear as unknown as LinearClient, llm);
+  ap = new Autopilot(cfg, store, linear as unknown as Tracker, llm);
 });
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));

@@ -1,8 +1,8 @@
-# linear-autopilot
+# autopilot
 
-A local macOS daemon that turns Linear tickets into Claude Code sessions, with you approving each one.
+A local macOS daemon that turns Linear or Jira tickets into Claude Code sessions, with you approving each one.
 
-It watches Linear for tickets assigned to you in **Ready for Development**. For each one it picks
+It watches your tracker (Linear, or Jira Cloud) for tickets assigned to you in **Ready for Development**. For each one it picks
 the repo in your code folder (`reposRoot`), plus any other repos the ticket also changes. It proposes a branch,
 writes a short explainer, then asks you to approve or reject it on a local web page. When you
 approve, Supacode creates a worktree on that branch in every repo involved (its own branch creation
@@ -10,7 +10,7 @@ and hooks run). A Claude Code session opens in the primary repo with the other w
 the agent can change them all. After that, the page tracks the work until the PRs are merged.
 
 ```
-Linear (MCP, OAuth) ──▶ newly eligible ticket ──▶ triage: repo + branch, explainer (claude -p)
+Linear or Jira (MCP, OAuth) ──▶ newly eligible ticket ──▶ triage: repo + branch, explainer (claude -p)
    ──▶ SQLite row + read-only brief ──▶ macOS notification ──▶ http://localhost:4747
    ──▶ Approve ──▶ per repo: git fetch + supacode repo worktree-new --branch …
    ──▶ supacode tab new -i "claude '<init prompt>' --add-dir <briefs> <other worktrees…>"   (in the primary worktree)
@@ -20,14 +20,17 @@ Linear (MCP, OAuth) ──▶ newly eligible ticket ──▶ triage: repo + bra
 ## Install (Homebrew)
 
 ```sh
-brew install mrinalraj/tap/linear-autopilot
-linear-autopilot login                 # once, in the browser
-brew services start linear-autopilot   # runs at login, restarts on crash
-open http://localhost:4747
+brew install mrinalraj/tap/autopilot
+brew services start autopilot   # runs at login, restarts on crash
+open http://localhost:4747      # pick Linear or Jira and sign in
 ```
 
+The first page asks which tracker your tickets live in and signs you in through the tracker's own
+page; `autopilot login` does the same from the terminal. Upgrading from `linear-autopilot` keeps
+your data, settings and sign-in: they move to the new name on first start.
+
 The formula pulls in `terminal-notifier` and `gh` (recommended). `launchd` and `osascript` are part
-of macOS. Under `brew services`, logs go to `$(brew --prefix)/var/log/linear-autopilot.log`.
+of macOS. Under `brew services`, logs go to `$(brew --prefix)/var/log/autopilot.log`.
 
 To install your own build instead, run `scripts/brew-install-local.sh` (builds, then installs from
 a local tap).
@@ -40,14 +43,14 @@ PR tracking.
 With the standalone binary (from a release, or `bun run build`):
 
 ```sh
-linear-autopilot login              # one-time browser OAuth to Linear; tokens go to the Keychain
-linear-autopilot once               # one poll in the foreground to check the setup
-linear-autopilot service install    # LaunchAgent: starts at login, restarts on crash
-linear-autopilot open
+autopilot login              # one-time browser OAuth to your tracker; tokens go to the Keychain
+autopilot once               # one poll in the foreground to check the setup
+autopilot service install    # LaunchAgent: starts at login, restarts on crash
+autopilot open
 ```
 
-The binary keeps its config, state and logs in `~/Library/Application Support/linear-autopilot/`
-(`linear-autopilot paths` shows them). Copy `config.example.json` there as `config.json` to
+The binary keeps its config, state and logs in `~/Library/Application Support/autopilot/`
+(`autopilot paths` shows them). Copy `config.example.json` there as `config.json` to
 customise it.
 
 From source, which needs [Bun](https://bun.sh) and keeps everything in the project folder:
@@ -80,7 +83,7 @@ For notifications that open the page when clicked:
 
 ```sh
 brew install terminal-notifier
-terminal-notifier -title linear-autopilot -message test   # click Allow once
+terminal-notifier -title autopilot -message test   # click Allow once
 ```
 
 If no permission prompt appears, enable it under System Settings → Notifications → terminal-notifier.
@@ -197,7 +200,7 @@ Terminal tabs start in the primary worktree:
 - **Remembered per ticket:** each ticket records the launcher that made its worktrees, and
   **Delete worktrees…** removes them with that same tool. Supacode and Worktrunk keep the branch;
   git uses `git worktree remove`.
-- **First use of Terminal or iTerm:** macOS asks once whether linear-autopilot may control it.
+- **First use of Terminal or iTerm:** macOS asks once whether autopilot may control it.
 
 ## Importing existing work
 
@@ -213,7 +216,7 @@ shows, with its Linear status only. Tickets that already have a card are left al
 
 ## Commands
 
-`linear-autopilot <command>` (from source: `bun run cli <command>`):
+`autopilot <command>` (from source: `bun run cli <command>`):
 
 | Command | What it does |
 | --- | --- |
@@ -222,7 +225,7 @@ shows, with its Linear status only. Tickets that already have a card are left al
 | `login [--force]` | Browser OAuth to Linear. `--force` discards stored credentials first. |
 | `reset` | Clear every ticket that hasn't been launched (pending, failed, rejected, dismissed) and its brief, then queue the tickets eligible right now for a fresh triage. Launched tickets and their PR tracking are kept. Click **Poll now** afterwards to triage straight away. Safe while the daemon runs. |
 | `update [--check]` | Install the latest release (`--check` only reports). |
-| `service install` / `uninstall` / `restart` / `status` | Manage the LaunchAgent `dev.linear-autopilot`. Run `install` again after moving the binary. |
+| `service install` / `uninstall` / `restart` / `status` | Manage the LaunchAgent `dev.autopilot`. Run `install` again after moving the binary. |
 | `open` / `paths` / `version` | Open the page; show where config, state and logs live; print the version. |
 
 Development: `bun test`, `bun run typecheck`, `bun run build`.
@@ -238,10 +241,10 @@ version exists, the page shows an **Update available** banner with the release n
 - **Standalone binary:** **Update now** downloads this Mac's build and checks its SHA-256 against
   the release's `checksums.txt`. It also confirms the new binary reports the expected version
   before swapping it in place. The service then restarts into it.
-- **Homebrew install:** the button runs `brew upgrade linear-autopilot`.
+- **Homebrew install:** the button runs `brew upgrade autopilot`.
 - **Running from source:** the banner just says to `git pull`.
 
-Nothing installs without a click. `linear-autopilot update --check` does the same check from the
+Nothing installs without a click. `autopilot update --check` does the same check from the
 command line.
 
 ## Building and releasing
@@ -249,13 +252,13 @@ command line.
 `bun run build` (`scripts/build.sh`) compiles standalone binaries for Apple Silicon and Intel into
 `dist/`:
 
-- `linear-autopilot-<version>-darwin-{arm64,x64}.tar.gz`, each containing the `linear-autopilot`
+- `autopilot-<version>-darwin-{arm64,x64}.tar.gz`, each containing the `autopilot`
   binary with the PWA assets embedded
 - `checksums.txt`
 
 To release, bump `version` in `package.json`, build, and attach those three files to a GitHub
 release tagged `v<version>`. The updater relies on exactly these names.
-Then run `scripts/brew-formula.sh`, which writes `packaging/linear-autopilot.rb` with the release
+Then run `scripts/brew-formula.sh`, which writes `packaging/autopilot.rb` with the release
 URLs, and copy it to `Formula/` in the [tap repo](https://github.com/mrinalraj/homebrew-tap).
 
 ## How it works
@@ -315,13 +318,16 @@ project directory, and `~` is expanded.
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `pollIntervalSeconds` | `1200` | Linear poll interval. **Poll now** triggers one immediately. |
+| `tracker` | `"linear"` | `"linear"` or `"jira"` (Jira Cloud). Each keeps its own tickets, briefs and sign-in; switch in Settings. |
+| `jira.site` | `""` | Which Jira site, when your Atlassian account reaches several (e.g. `acme.atlassian.net`). |
+| `jira.pickupStates` / `jira.importStates` | as below | Jira's own status lists; Jira status names rarely match Linear's. |
+| `pollIntervalSeconds` | `1200` | Tracker poll interval. **Poll now** triggers one immediately. |
 | `workCheckIntervalSeconds` | `300` | Commit and PR check interval for launched tickets. |
 | `pickupStates` | `["Ready for Development"]` | Linear status names (case-insensitive) that make an assigned ticket eligible. `[]` = any open state. |
 | `port` | `4747` (`4800` from source) | Web page; binds to `127.0.0.1` only. |
 | `oauthCallbackPort` | `4748` | Loopback redirect used by `bun run login`. |
 | `reposRoot` | `~/code` | Every git repo directly under it is a launch target. |
-| `stateDir` / `briefsDir` | `./state` / `./state/briefs` | |
+| `stateDir` / `briefsDir` | `./state` / `./state/briefs` | `./state/jira` for Jira. |
 | `githubUser` | `""` | GitHub account used for PR tracking. Empty means `gh`'s active account. Set it if you keep several `gh` logins, so switching accounts doesn't break tracking. |
 | `linearUserId` | `""` | Empty = the logged-in Linear user. |
 | `processExistingOnFirstRun` | `false` | Triage already-eligible tickets on the very first poll. |
@@ -339,9 +345,9 @@ project directory, and `~` is expanded.
 
 | What | Where |
 | --- | --- |
-| Linear OAuth tokens | Keychain, service `linear-autopilot`, account `linear-mcp-oauth`. Written by `bun run login`. |
+| Tracker OAuth tokens | Keychain, service `autopilot`, account `linear-mcp-oauth` or `jira-mcp-oauth` (with `-dev` appended when running from source). Written by `autopilot login` or Settings → Sign in. |
 | Claude (triage) | Your Claude Code login (`llm.provider: "cli"`). |
-| `ANTHROPIC_API_KEY` | Only for `llm.provider: "api"`. Taken from the environment, or from the Keychain (service `linear-autopilot`, account `ANTHROPIC_API_KEY`; add it with `security add-generic-password -s linear-autopilot -a ANTHROPIC_API_KEY -w`). |
+| `ANTHROPIC_API_KEY` | Only for `llm.provider: "api"`. Taken from the environment, or from the Keychain (service `autopilot`, account `ANTHROPIC_API_KEY`; add it with `security add-generic-password -s autopilot -a ANTHROPIC_API_KEY -w`). |
 | GitHub (PR tracking) | Your `gh` login: the account named in `githubUser` (its token is read with `gh auth token -u` and kept in memory only), or the active account. |
 
 Secrets are never written to config, logs, briefs or SQLite.
@@ -373,8 +379,8 @@ Ticket text is untrusted, and it ends up in front of an agent with shell access.
 - **"Linear login required"** on the page or in the log: run `bun run login`.
 - **`forbidden origin` or `bad csrf token`:** reload the page. The CSRF token changes whenever the
   daemon restarts.
-- **Page not loading after an install or restart:** check the log (`linear-autopilot paths`). A second
-  copy started by hand will fail to bind the port; `linear-autopilot service status` shows whether
+- **Page not loading after an install or restart:** check the log (`autopilot paths`). A second
+  copy started by hand will fail to bind the port; `autopilot service status` shows whether
   the service is running.
 - **No notifications:** allow terminal-notifier (see Quick start).
 - **A ticket you expected isn't showing:** it must be assigned to you *and* in a `pickupStates`
@@ -401,7 +407,9 @@ bun run typecheck
 | `src/service.ts` / `src/env.ts` | LaunchAgent install / PATH and secrets setup for launchd |
 | `src/pwa.ts` | Manifest, service worker, offline page, embedded icons |
 | `src/autopilot.ts` | Detection, triage, approve, reject, launch orchestration |
-| `src/linear.ts` | Linear MCP client and Keychain OAuth provider |
+| `src/tracker.ts` / `src/connect.ts` | The `Tracker` interface and per-tracker specs / opening the configured one |
+| `src/linear.ts` / `src/jira.ts` / `src/adf.ts` | Linear and Jira Cloud clients / Atlassian rich text to Markdown |
+| `src/mcp.ts` | MCP session with reconnect, and the Keychain OAuth provider |
 | `src/login.ts` / `src/reset.ts` | `login` / `reset` commands |
 | `src/triage.ts` / `src/llm.ts` | Triage prompts and schemas / `claude -p` and API backends |
 | `src/branch.ts` | Branch name validation and repair |

@@ -9,7 +9,7 @@ import { log } from "./log";
 /**
  * "Update available" checks against GitHub Releases, and in-place updates. Checks are automatic;
  * installs only happen when asked. Release assets follow scripts/build.sh:
- * linear-autopilot-<version>-darwin-<arch>.tar.gz plus checksums.txt (SHA-256).
+ * autopilot-<version>-darwin-<arch>.tar.gz plus checksums.txt (SHA-256).
  */
 
 // Read at call time so tests (and overrides) can point at another server.
@@ -52,11 +52,11 @@ export function newer(a: string, b: string): boolean {
 }
 
 export const assetName = (ver: string, arch = process.arch === "arm64" ? "arm64" : "x64") =>
-  `linear-autopilot-${ver}-darwin-${arch}.tar.gz`;
+  `autopilot-${ver}-darwin-${arch}.tar.gz`;
 
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
   const res = await fetch(`${api()}/repos/${repo()}/releases/latest`, {
-    headers: { Accept: "application/vnd.github+json", "User-Agent": `linear-autopilot/${CURRENT}` },
+    headers: { Accept: "application/vnd.github+json", "User-Agent": `autopilot/${CURRENT}` },
     signal: AbortSignal.timeout(15_000),
   });
   if (res.status === 404) return null; // no releases yet (or the repo isn't public)
@@ -78,7 +78,7 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
 }
 
 async function download(url: string): Promise<Uint8Array> {
-  const res = await fetch(url, { headers: { "User-Agent": `linear-autopilot/${CURRENT}` }, signal: AbortSignal.timeout(300_000) });
+  const res = await fetch(url, { headers: { "User-Agent": `autopilot/${CURRENT}` }, signal: AbortSignal.timeout(300_000) });
   if (!res.ok) throw new Error(`download failed: HTTP ${res.status} for ${url}`);
   return new Uint8Array(await res.arrayBuffer());
 }
@@ -101,12 +101,12 @@ export async function installStandalone(info: UpdateInfo, target = process.execP
   const actual = createHash("sha256").update(tarball).digest("hex");
   if (!expected || expected !== actual) throw new Error(`checksum mismatch for ${assetName(info.latest)}`);
 
-  const work = mkdtempSync(join(tmpdir(), "linear-autopilot-update-"));
+  const work = mkdtempSync(join(tmpdir(), "autopilot-update-"));
   try {
     await Bun.write(join(work, "update.tar.gz"), tarball);
     const tar = Bun.spawnSync(["tar", "-xzf", "update.tar.gz"], { cwd: work, stderr: "pipe" });
     if (tar.exitCode !== 0) throw new Error(`could not extract update: ${tar.stderr}`);
-    const fresh = join(work, "linear-autopilot");
+    const fresh = join(work, "autopilot");
     chmodSync(fresh, 0o755);
     const reported = Bun.spawnSync([fresh, "version"], { stdout: "pipe" }).stdout.toString().trim();
     if (reported !== info.latest) throw new Error(`downloaded binary reports version "${reported}", expected ${info.latest}`);
@@ -122,7 +122,7 @@ export async function installStandalone(info: UpdateInfo, target = process.execP
 
 export function installHomebrew(): void {
   const brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].find((p) => Bun.file(p).size > 0) ?? "brew";
-  const r = Bun.spawnSync([brew, "upgrade", "linear-autopilot"], { stdout: "pipe", stderr: "pipe", env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: "" } });
+  const r = Bun.spawnSync([brew, "upgrade", "autopilot"], { stdout: "pipe", stderr: "pipe", env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: "" } });
   if (r.exitCode !== 0) throw new Error(`brew upgrade failed: ${`${r.stderr}`.trim().slice(-500)}`);
 }
 

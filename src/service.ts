@@ -3,10 +3,10 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { COMPILED, HOME_DIR, LOG_PATH } from "./config";
 
-/** LaunchAgent that runs `linear-autopilot start` at login and restarts it if it exits. */
-export const LABEL = "dev.linear-autopilot";
+/** LaunchAgent that runs `autopilot start` at login and restarts it if it exits. */
+export const LABEL = "dev.autopilot";
 /** Labels `brew services` uses (newer Homebrew: sh.brew.*, older: homebrew.mxcl.*). */
-const BREW_LABELS = ["sh.brew.linear-autopilot", "homebrew.mxcl.linear-autopilot"];
+const BREW_LABELS = ["sh.brew.autopilot", "homebrew.mxcl.autopilot", "sh.brew.linear-autopilot", "homebrew.mxcl.linear-autopilot"];
 
 const plistPath = (label: string) => join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
 const domain = () => `gui/${process.getuid!()}`;
@@ -27,7 +27,7 @@ function launchctl(...args: string[]) {
 
 export function installService() {
   if (COMPILED && process.execPath.includes("/Cellar/")) {
-    throw new Error("installed with Homebrew: use `brew services start linear-autopilot` instead");
+    throw new Error("installed with Homebrew: use `brew services start autopilot` instead");
   }
   mkdirSync(dirname(LOG_PATH), { recursive: true });
   const args = programArguments().map((a) => `<string>${xml(a)}</string>`).join("");
@@ -68,7 +68,7 @@ function loadedLabel(): string | null {
 
 export function restartService() {
   const r = launchctl("kickstart", "-k", `${domain()}/${loadedLabel() ?? LABEL}`);
-  if (r.code !== 0) throw new Error(`not installed or not loaded (${r.out}); run: linear-autopilot service install`);
+  if (r.code !== 0) throw new Error(`not installed or not loaded (${r.out}); run: autopilot service install`);
   console.log("Restarted.");
 }
 

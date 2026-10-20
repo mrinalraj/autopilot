@@ -4,7 +4,7 @@ import { eventsSince } from "./log";
 import { mkdirSync } from "node:fs";
 import { launchSteps } from "./steps";
 import { launcherFor, pathFromId } from "./launch";
-import { LOG_PATH } from "./config";
+import { loadConfig, LOG_PATH } from "./config";
 import { ICONS, MANIFEST, offlinePage, SERVICE_WORKER } from "./pwa";
 import { Autopilot, phaseOf } from "./autopilot";
 import type { IssueRow, IssueStatus } from "./db";
@@ -13,7 +13,8 @@ import { Store } from "./db";
 import { atRisk, isSettled, overallStage, stage, type RepoWork, type WorkStage } from "./work";
 import type { Updater } from "./updater";
 import type { Health, SetupItem } from "./health";
-import { githubAccounts, saveSettings } from "./settings";
+import { githubAccounts, saveSettings, saveTracker } from "./settings";
+import { openTracker } from "./connect";
 import { settingsBody } from "./settings-page";
 import { managedByLaunchd } from "./update";
 import { resetTickets } from "./reset";
@@ -154,7 +155,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
     const multi = (list?.length ?? 0) > 1;
     const prs = (list ?? []).filter((w) => w.pr);
     const linearState = r.linear_state ? `<span class="pill linear" title="Linear status">${esc(r.linear_state)}</span>` : "";
-    const summary = r.worktree_id ? workSummary(list) : `<div class="workline">No worktree found for this ticket; showing its Linear status only.</div>`;
+    const summary = r.worktree_id ? workSummary(list) : `<div class="workline">No worktree found for this ticket; showing its ${esc(ap.trackerLabel)} status only.</div>`;
     return `<article class="card w-${st}">
       <div class="cardhead">${r.worktree_id ? stageBadge(st) : ""}<span class="ident">${esc(r.identifier)}</span>${linearState}</div>
       <a class="title" href="#${modalId(r.identifier)}">${esc(r.title)}</a>
@@ -323,7 +324,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
             <div class="cardhead">${badge(r.status, r.error)}<span class="ident">${esc(r.identifier)}</span>
               <span class="muted small">${esc(t.state)} · ${esc(t.team)}${t.project ? ` · ${esc(t.project)}` : ""}${t.labels.length ? ` · ${esc(t.labels.join(", "))}` : ""}</span></div>
             <h1>${esc(r.title)}</h1>
-            <div class="small" style="margin-top:4px"><a href="${esc(r.url)}" rel="noreferrer" target="_blank">Open in Linear ↗</a></div>
+            <div class="small" style="margin-top:4px"><a href="${esc(r.url)}" rel="noreferrer" target="_blank">Open in ${esc(ap.trackerLabel)} ↗</a></div>
           </div><a class="close" href="#" aria-label="Close">×</a></div>
         <div class="body">
           ${r.status === "failed" && r.error ? `<div class="alert" style="margin-bottom:14px"><strong>Launch failed.</strong> ${esc(r.error)}</div>` : ""}
@@ -398,9 +399,21 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
     const pollInfo = ap.lastPollAt ? `Last checked ${time(ap.lastPollAt)} · next ${next}` : "Not checked yet";
     const picks = ap.cfg.pickupStates.length ? ap.cfg.pickupStates.join(", ") : "any open state";
 
+    /** First run (nothing signed in, no tickets yet): pick a tracker and sign in, in one click. */
+    const connectCard = () => {
+      const button = (kind: "linear" | "jira", label: string) =>
+        `<form method="post" action="/actions/switch-tracker">${tokenField}<input type="hidden" name="tracker" value="${kind}">
+          <input type="hidden" name="signin" value="1"><input type="hidden" name="from" value="home">
+          <button class="${ap.cfg.tracker === kind ? "primary" : ""}" data-busy-label="Opening ${label}…">Connect ${label}</button></form>`;
+      return `<section class="box connect" style="margin-top:14px"><h3>Connect your issue tracker</h3>
+        <p style="margin:0 0 12px">Autopilot watches tickets assigned to you and proposes a Claude Code session for each one you approve. Pick where your tickets live; you sign in on the tracker's own page and the credentials stay in the macOS Keychain.</p>
+        <div class="row">${button("linear", "Linear")}${button("jira", "Jira")}</div>
+        <div class="muted small" style="margin-top:8px">Jira means Jira Cloud (your site's admin may need to allow Atlassian's MCP server). You can switch later in Settings.</div></section>`;
+    };
+
     return page(
-      queue.length ? `(${queue.length}) Linear autopilot` : "Linear autopilot",
-      `<div class="top"><div class="brand"><div class="logo">L</div><div><h1>Linear autopilot</h1>
+      queue.length ? `(${queue.length}) Autopilot` : "Autopilot",
+      `<div class="top"><div class="brand"><div class="logo">A</div><div><h1>Autopilot</h1>
           <div class="muted small">${esc(pollInfo)} · picks up your tickets in <strong>${esc(picks)}</strong></div></div></div>
         <div class="row"><form method="post" action="/poll">${tokenField}<button${ap.polling ? " disabled" : ""} data-busy-label="Checking…">↻ Poll now</button></form>
           <button type="button" class="btn" id="logtoggle" aria-controls="logs" aria-expanded="false">Logs</button>
@@ -414,10 +427,14 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
        <div id="live" data-version="${esc(version())}" data-boot="${bootId}" data-awaiting="${queue.length}">${banner.html}</div>
        ${notice ? `<div class="notice">${esc(notice)}</div>` : ""}
        ${
-         ap.lastPollError
+         ap.signingIn && ap.isEmpty()
+           ? `<section class="box connect" style="margin-top:14px"><div class="step" id="signin-wait"><span class="spinner"></span><span>Waiting for you to approve ${esc(ap.trackerLabel)} access in the browser tab that just opened…</span></div></section>`
+           : ap.lastPollError && /login required/i.test(ap.lastPollError) && ap.isEmpty()
+           ? connectCard()
+           : ap.lastPollError
            ? `<div class="alert" style="margin-top:14px">Last poll failed: ${esc(ap.lastPollError)}${
                /login required/i.test(ap.lastPollError)
-                 ? `<form method="post" action="/actions/linear-signin" style="margin-top:8px">${tokenField}<button class="primary" data-busy-label="Opening Linear…">Sign in to Linear</button></form>`
+                 ? `<form method="post" action="/actions/signin" style="margin-top:8px">${tokenField}<button class="primary" data-busy-label="Opening ${esc(ap.trackerLabel)}…">Sign in to ${esc(ap.trackerLabel)}</button></form>`
                  : ""
              }</div>`
            : ""
@@ -483,17 +500,37 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
             return redirect(`/settings?error=${encodeURIComponent(`Reset failed: ${(err as Error).message}`)}`);
           }
         }
-        if (path === "/actions/linear-signin") {
+        if (path === "/actions/signin") {
           const res = ap.startSignIn();
           return redirect(
             res.ok
-              ? `/settings?notice=${encodeURIComponent("Linear opened in your browser: approve access there, and this page updates once you're signed in.")}`
+              ? `/settings?notice=${encodeURIComponent(`${ap.trackerLabel} opened in your browser: approve access there, and this page updates once you're signed in.`)}`
               : `/settings?error=${encodeURIComponent(res.error)}`,
           );
         }
-        if (path === "/actions/linear-signout") {
-          await ap.signOutOfLinear();
-          return redirect(`/settings?notice=${encodeURIComponent("Signed out of Linear.")}`);
+        if (path === "/actions/signout") {
+          await ap.signOut();
+          return redirect(`/settings?notice=${encodeURIComponent(`Signed out of ${ap.trackerLabel}.`)}`);
+        }
+        if (path === "/actions/switch-tracker") {
+          // Also the first-run "Connect" buttons, which add signin=1.
+          const res = saveTracker(form);
+          if (!res.ok) return redirect(`/settings?error=${encodeURIComponent(res.error)}`);
+          const back = form.get("from") === "home" ? "/" : "/settings";
+          const site = form.has("jiraSite") ? String(form.get("jiraSite")).trim() : ap.cfg.jira.site;
+          if (res.tracker !== ap.cfg.tracker || site !== ap.cfg.jira.site) {
+            Object.assign(ap.cfg, loadConfig());
+            const sw = await ap.switchTracker(() => openTracker(ap.cfg).tracker);
+            if (!sw.ok) return redirect(`${back}?error=${encodeURIComponent(sw.error)}`);
+            health?.refresh().catch(() => {});
+          }
+          if (form.get("signin")) {
+            const si = ap.startSignIn();
+            if (!si.ok) return redirect(`${back}?error=${encodeURIComponent(si.error)}`);
+            return redirect(`${back}?notice=${encodeURIComponent(`${ap.trackerLabel} opened in your browser: approve access there, and this page updates once you're signed in.`)}`);
+          }
+          void ap.poll();
+          return redirect(`${back}?notice=${encodeURIComponent(`Now using ${ap.trackerLabel}.`)}`);
         }
         if (path === "/actions/trust-folder") {
           // Opening the folder makes the editor ask "Do you trust the authors?"; the choice stays with the user.
@@ -587,9 +624,10 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
           ap.account().catch(() => null),
         ]);
         return page(
-          "Settings · Linear autopilot",
+          "Settings · Autopilot",
           settingsBody({
             cfg: ap.cfg,
+            tracker: ap.trackerLabel,
             account,
             signingIn: ap.signingIn,
             tokenField,

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { Store } from "../src/db";
 import { Autopilot } from "../src/autopilot";
-import type { LinearClient, LinearIssue } from "../src/linear";
+import type { Tracker, TrackerIssue as LinearIssue } from "../src/tracker";
 import type { JsonRequest, LLM } from "../src/llm";
 import { supacodeId } from "../src/launch";
 
@@ -90,7 +90,7 @@ beforeAll(() => {
   cfg.importWorktrees = false;
   store = new Store(cfg.stateDir);
   linear.add("pre", ME); // already mine before first run
-  ap = new Autopilot(cfg, store, linear as unknown as LinearClient, llm);
+  ap = new Autopilot(cfg, store, linear as unknown as Tracker, llm);
 });
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -163,7 +163,7 @@ test("reject removes the brief and the item leaves the queue", async () => {
 
 test("restart does not re-triage handled tickets", async () => {
   const before = llm.calls;
-  const restarted = new Autopilot(cfg, new Store(cfg.stateDir), linear as unknown as LinearClient, llm);
+  const restarted = new Autopilot(cfg, new Store(cfg.stateDir), linear as unknown as Tracker, llm);
   linear.assign("new1", ME); // touch updatedAt; still assigned
   await restarted.poll();
   expect(llm.calls).toBe(before);

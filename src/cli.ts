@@ -2,10 +2,10 @@ import { version } from "../package.json";
 import { baseUrl, CONFIG_PATH, HOME_DIR, loadConfig, LOG_PATH } from "./config";
 import { preparePath } from "./env";
 
-const HELP = `linear-autopilot ${version}
+const HELP = `autopilot ${version}
 Triage Linear tickets assigned to you and launch Claude Code sessions for the ones you approve.
 
-Usage: linear-autopilot <command>
+Usage: autopilot <command>
 
   start                 Run the daemon and approval page (what the service runs)
   once                  Run one poll + triage pass, then exit
@@ -47,7 +47,7 @@ try {
       else if (flags.has("--check")) console.log(`Update available: ${info.current} → ${info.latest}\n${info.url}`);
       else {
         await u.applyUpdate(info);
-        console.log(`Updated to ${info.latest}. Restart the service to use it: linear-autopilot service restart`);
+        console.log(`Updated to ${info.latest}. Restart the service to use it: autopilot service restart`);
       }
       break;
     }
@@ -60,7 +60,7 @@ try {
       else if (sub === "uninstall") s.uninstallService();
       else if (sub === "restart") s.restartService();
       else if (sub === "status") console.log(s.serviceStatus());
-      else throw new Error("usage: linear-autopilot service install|uninstall|restart|status");
+      else throw new Error("usage: autopilot service install|uninstall|restart|status");
       break;
     }
     case "paths":
@@ -81,6 +81,6 @@ try {
       process.exitCode = 2;
   }
 } catch (err) {
-  console.error(`linear-autopilot: ${(err as Error).message}`);
+  console.error(`autopilot: ${(err as Error).message}`);
   process.exitCode = 1;
 }

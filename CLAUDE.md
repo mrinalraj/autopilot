@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-linear-autopilot is a local macOS daemon in Bun + TypeScript. It polls Linear for tickets assigned
+autopilot is a local macOS daemon in Bun + TypeScript. It polls Linear for tickets assigned
 to the user in Ready for Development and triages them with `claude -p`. On approval it launches a
 Supacode worktree with a Claude Code session, then tracks commits and the PR. See README.md for the
 user-facing picture.
@@ -17,13 +17,14 @@ tail -f logs/autopilot.log
 ```
 
 The installed app (Homebrew, `brew services`) serves http://localhost:4747. From source the default
-port is 4800 and the data lives in the project folder, so `bun run start` runs alongside it. Both
-share the Linear login in the Keychain: signing out in one signs out the other. `src/cli.ts` is the single entry point, both from source
-and as the compiled binary.
+port is 4800, the data lives in the project folder, and tracker sign-ins use their own Keychain
+entries (`<account>-dev`, see `oauthAccount`), so `bun run start` runs alongside it without
+touching its login. `src/cli.ts` is the single entry point, both from source and as the compiled
+binary.
 
 Config, state and logs live under `HOME_DIR` (`config.ts`):
 - `AUTOPILOT_HOME` if set
-- otherwise `~/Library/Application Support/linear-autopilot` in the compiled binary
+- otherwise `~/Library/Application Support/autopilot` in the compiled binary
 - otherwise the project folder when running from source.
 
 Never derive paths from `import.meta.dir` elsewhere: inside the binary it's Bun's virtual filesystem.
@@ -47,9 +48,18 @@ Never derive paths from `import.meta.dir` elsewhere: inside the binary it's Bun'
   - New columns are added with an `ALTER TABLE` guard in the `Store` constructor.
 - Briefs (`state/briefs/*.md`) are a read-only projection of an `issues` row, regenerated whole by
   `writeBrief`. Never edit them in place.
-- `linear.ts` talks to Linear's hosted MCP server over OAuth (tokens in the Keychain). Many workspaces forbid
-  personal API keys, so don't add a `LINEAR_API_KEY` path. Tool results are JSON text; `list_issues`
-  truncates descriptions, so use `get_issue` for full text.
+- Trackers sit behind `Tracker` (`tracker.ts`); `openTracker` (`connect.ts`) builds the configured
+  one (`cfg.tracker`). `linear.ts` and `jira.ts` talk to the hosted MCP servers (Linear's, and
+  Atlassian's at mcp.atlassian.com) over OAuth with tokens in the Keychain (`mcp.ts`). Many
+  workspaces forbid personal API keys, so don't add an API-key path. Tool results are JSON text.
+  Linear: `list_issues` truncates descriptions, so use `get_issue`. Jira: every tool needs the
+  site's cloudId; text is requested as Markdown but empty fields still come back as ADF (`adf.ts`);
+  JQL must be bounded, and naming a status the site lacks fails the whole query. Statuses use
+  Linear's type vocabulary (Jira's categories new/indeterminate/done map to
+  unstarted/started/completed). `linear_*` DB columns hold the active tracker's IDs and status.
+- Each tracker has its own state dir (`state/` for Linear, `state/jira/` for Jira) and its own
+  pickup/import statuses (`jira.pickupStates` …), so ticket keys and briefs never mix. Switching
+  (`Autopilot.switchTracker`) swaps the store and client live and is refused mid-check or launch.
 - `web.ts` renders server-side HTML. Modals are CSS `:target` (`#m-<identifier>`). One nonce'd
   inline script polls `/state` to update the progress banner, set the Dock badge
   (`setAppBadge(awaiting)`), and reload when the `version` changes.

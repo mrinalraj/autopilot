@@ -1,12 +1,12 @@
 {
-  "name": "linear-autopilot",
-  "version": "0.1.0-beta.3",
+  "name": "autopilot",
+  "version": "0.1.0-beta.4",
   "private": true,
   "type": "module",
-  "repository": "mrinalraj/linear-autopilot",
+  "repository": "mrinalraj/autopilot",
   "license": "MIT",
   "bin": {
-    "linear-autopilot": "src/cli.ts"
+    "autopilot": "src/cli.ts"
   },
   "scripts": {
     "start": "bun run src/cli.ts start",

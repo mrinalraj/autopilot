@@ -6,7 +6,7 @@ import { loadConfig } from "../src/config";
 import { Store } from "../src/db";
 import { Autopilot } from "../src/autopilot";
 import { startWeb } from "../src/web";
-import type { LinearClient } from "../src/linear";
+import type { Tracker } from "../src/tracker";
 import type { LLM } from "../src/llm";
 
 const dir = mkdtempSync(join(tmpdir(), "autopilot-web-"));
@@ -38,7 +38,7 @@ beforeAll(() => {
     explainer_json: JSON.stringify({ summary: "sum", approach: "app", likely_areas: [], size: "S" }), extra_repos_json: "[]",
   });
   cfgStateDir = cfg.stateDir;
-  const ap = new Autopilot(cfg, store, {} as LinearClient, {} as LLM);
+  const ap = new Autopilot(cfg, store, { kind: "linear", label: "Linear" } as Tracker, {} as LLM);
   server = startWeb(ap, { health: health as never });
 });
 
@@ -141,7 +141,8 @@ test("log panel is prefilled, escaped, and /events streams only newer lines", as
 test("settings shows the Linear account section (signed out here)", async () => {
   const html = await (await fetch(`${base}/settings`)).text();
   expect(html).toContain("Linear account");
-  expect(html).toContain('action="/actions/linear-signin"');
+  expect(html).toContain('action="/actions/signin"');
+  expect(html).toContain('<option value="linear" selected>Linear</option>');
   expect(html).toContain("Sign in to Linear");
 });
 
@@ -186,4 +187,21 @@ test("reject via the form, as a browser sends it", async () => {
   expect(res.status).toBe(303);
   expect(store.getIssueByIdentifier("ENG-9")!.status).toBe("rejected");
   expect(await (await fetch(`${base}/`)).text()).toContain(`<h2>Awaiting approval</h2><span class="count">0</span>`);
+});
+
+test("first run: no sign-in and no tickets shows the connect card instead of an error", async () => {
+  const s = new Store(join(dir, "fresh"));
+  const cfg = { ...loadConfig("/nonexistent"), port: port + 1, stateDir: join(dir, "fresh"), briefsDir: join(dir, "fresh", "b") };
+  const ap = new Autopilot(cfg, s, { kind: "linear", label: "Linear" } as Tracker, {} as LLM);
+  ap.lastPollError = "Linear login required: sign in from Settings";
+  const srv = startWeb(ap, { health: { items: [], refresh: async () => [] } as never });
+  try {
+    const html = await (await fetch(`http://localhost:${port + 1}/`)).text();
+    expect(html).toContain("Connect your issue tracker");
+    expect(html).toContain('<button class="primary" data-busy-label="Opening Linear…">Connect Linear</button>');
+    expect(html).toContain('name="tracker" value="jira"');
+    expect(html).not.toContain("Last poll failed");
+  } finally {
+    srv.stop(true);
+  }
 });

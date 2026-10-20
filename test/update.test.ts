@@ -15,9 +15,9 @@ beforeAll(async () => {
   // A fake new release: a "binary" that reports 9.9.9.
   const pkg = join(dir, "pkg");
   Bun.spawnSync(["mkdir", "-p", pkg]);
-  writeFileSync(join(pkg, "linear-autopilot"), "#!/bin/sh\necho 9.9.9\n");
-  chmodSync(join(pkg, "linear-autopilot"), 0o755);
-  Bun.spawnSync(["tar", "-C", pkg, "-czf", join(dir, "rel.tar.gz"), "linear-autopilot"]);
+  writeFileSync(join(pkg, "autopilot"), "#!/bin/sh\necho 9.9.9\n");
+  chmodSync(join(pkg, "autopilot"), 0o755);
+  Bun.spawnSync(["tar", "-C", pkg, "-czf", join(dir, "rel.tar.gz"), "autopilot"]);
   tarball = new Uint8Array(readFileSync(join(dir, "rel.tar.gz")));
 
   process.env.AUTOPILOT_UPDATE_API = `http://localhost:${port}`;
@@ -74,7 +74,7 @@ test("finds the newer release and this machine's asset", async () => {
 });
 
 test("standalone install verifies the checksum and swaps the binary in place", async () => {
-  const target = join(dir, "installed-linear-autopilot");
+  const target = join(dir, "installed-autopilot");
   writeFileSync(target, "#!/bin/sh\necho 0.1.0\n");
   chmodSync(target, 0o755);
   const info = (await u.checkForUpdate())!;

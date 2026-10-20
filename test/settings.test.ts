@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
-import { saveSettings } from "../src/settings";
+import { saveSettings, saveTracker } from "../src/settings";
 
 const dir = mkdtempSync(join(tmpdir(), "autopilot-settings-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -75,4 +75,23 @@ test("repo list mode names same-named repos distinctly", async () => {
   const { repoSources } = await import("../src/catalog");
   const cfg = loadConfig(configPath);
   expect(repoSources(cfg).map((r) => r.name)).toEqual(["api", "code-api"]);
+});
+
+test("each tracker keeps its own pickup and import statuses", () => {
+  const path = join(dir, "tracker.json");
+  writeFileSync(path, JSON.stringify({ stateDir: join(dir, "state"), pickupStates: ["Ready for Development"] }));
+  expect(saveTracker(form({ tracker: "jira", jiraSite: "https://acme.atlassian.net" }), path)).toEqual({ ok: true, tracker: "jira" });
+  const jira = loadConfig(path);
+  expect([jira.tracker, jira.jira.site, jira.pickupStates]).toEqual(["jira", "https://acme.atlassian.net", ["Ready for Development"]]);
+
+  expect(saveSettings(jira, form({ ...valid, pickupStates: "To Do", pickupStatesOther: "" }), path).errors).toEqual([]);
+  const raw = JSON.parse(readFileSync(path, "utf8"));
+  expect(raw.jira.pickupStates).toEqual(["To Do"]);
+  expect(raw.pickupStates).toEqual(["Ready for Development"]); // Linear's untouched
+  expect(jira.pickupStates).toEqual(["To Do"]); // applied live
+
+  saveTracker(form({ tracker: "linear" }), path);
+  expect(loadConfig(path).pickupStates).toEqual(["Ready for Development"]);
+  expect(loadConfig(path).jira.site).toBe("https://acme.atlassian.net"); // no jiraSite field: kept
+  expect(saveTracker(form({ tracker: "trello" }), path)).toEqual({ ok: false, error: "Pick Linear or Jira." });
 });

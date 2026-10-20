@@ -1,183 +1,23 @@
-import { randomBytes } from "node:crypto";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { UnauthorizedError, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { keychainGet, keychainSet } from "./keychain";
+import type { Json, ToolCaller } from "./mcp";
+import type { IssueRef, Me, Tracker, TrackerIssue } from "./tracker";
 
 /**
- * Linear access through Linear's hosted MCP server (https://mcp.linear.app/mcp) with OAuth,
- * for workspaces that don't allow personal API keys. One browser login (`bun run login`)
- * registers a client and stores tokens in the Keychain; the SDK refreshes them after that.
+ * Linear through its hosted MCP server (https://mcp.linear.app/mcp). Tool results are JSON text;
+ * `list_issues` truncates descriptions, so full text comes from `get_issue`.
  */
 
-export const LINEAR_MCP_URL = new URL("https://mcp.linear.app/mcp");
-const KEYCHAIN_ACCOUNT = "linear-mcp-oauth";
+export class LinearClient implements Tracker {
+  readonly kind = "linear";
+  readonly label = "Linear";
 
-export interface LinearIssue {
-  /** Linear UUID. */
-  id: string;
-  identifier: string;
-  title: string;
-  description: string | null;
-  url: string;
-  updatedAt: string;
-  /** Linear's suggested branch name for the issue. */
-  gitBranchName: string | null;
-  assigneeId: string | null;
-  state: { name: string; type: string };
-  team: { id: string; key: string; name: string };
-  project: string | null;
-  labels: string[];
-  attachments: { title: string; url: string }[];
-  comments: { author: string; createdAt: string; body: string }[];
-}
+  constructor(private readonly mcp: ToolCaller) {}
 
-/** Minimal row used for assignment tracking. */
-export interface IssueRef {
-  id: string;
-  identifier: string;
-  assigneeId: string | null;
-  stateName: string;
-  stateType: string;
-}
-
-export const CLOSED_STATE_TYPES = new Set(["completed", "canceled", "duplicate"]);
-
-export class LoginRequiredError extends Error {
-  constructor() {
-    super("Linear login required: sign in from Settings (or run `linear-autopilot login`)");
-  }
-}
-
-interface StoredAuth {
-  clientInformation?: OAuthClientInformationMixed;
-  tokens?: OAuthTokens;
-  codeVerifier?: string;
-}
-
-/** OAuth state persisted as one JSON blob in the Keychain. */
-export class KeychainOAuthProvider implements OAuthClientProvider {
-  private cache: StoredAuth | null = null;
-  private readonly stateValue = randomBytes(16).toString("hex");
-
-  constructor(
-    private readonly redirect: string,
-    private readonly scope: string,
-    /** Called with the authorization URL; non-interactive callers throw LoginRequiredError. */
-    private readonly onAuthorize: (url: URL) => void | Promise<void>,
-  ) {}
-
-  private async load(): Promise<StoredAuth> {
-    this.cache ??= JSON.parse((await keychainGet(KEYCHAIN_ACCOUNT)) ?? "{}");
-    return this.cache!;
-  }
-
-  /** Forgets the in-memory copy so the next call re-reads the Keychain (after sign-in or sign-out). */
-  reset() {
-    this.cache = null;
-  }
-
-  private async save(patch: Partial<StoredAuth>) {
-    this.cache = { ...(await this.load()), ...patch };
-    await keychainSet(KEYCHAIN_ACCOUNT, JSON.stringify(this.cache));
-  }
-
-  get redirectUrl() {
-    return this.redirect;
-  }
-
-  get clientMetadata(): OAuthClientMetadata {
-    return {
-      client_name: "linear-autopilot (local)",
-      redirect_uris: [this.redirect],
-      grant_types: ["authorization_code", "refresh_token"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-      scope: this.scope,
-    };
-  }
-
-  state() {
-    return this.stateValue;
-  }
-
-  async clientInformation() {
-    return (await this.load()).clientInformation;
-  }
-
-  async saveClientInformation(clientInformation: OAuthClientInformationMixed) {
-    await this.save({ clientInformation });
-  }
-
-  async tokens() {
-    return (await this.load()).tokens;
-  }
-
-  async saveTokens(tokens: OAuthTokens) {
-    await this.save({ tokens });
-  }
-
-  async redirectToAuthorization(url: URL) {
-    await this.onAuthorize(url);
-  }
-
-  async saveCodeVerifier(codeVerifier: string) {
-    await this.save({ codeVerifier });
-  }
-
-  async codeVerifier() {
-    const v = (await this.load()).codeVerifier;
-    if (!v) throw new Error("no PKCE code verifier saved");
-    return v;
-  }
-}
-
-export function connectMcp(provider: OAuthClientProvider) {
-  const transport = new StreamableHTTPClientTransport(LINEAR_MCP_URL, { authProvider: provider });
-  const client = new Client({ name: "linear-autopilot", version: "0.1.0" });
-  return { client, transport, connect: () => client.connect(transport) };
-}
-
-type Json = Record<string, any>;
-
-export class LinearClient {
-  private client: Client | null = null;
-
-  constructor(private readonly provider: OAuthClientProvider) {}
-
-  private async connected(): Promise<Client> {
-    if (!this.client) {
-      const { client, connect } = connectMcp(this.provider);
-      await connect();
-      this.client = client;
-    }
-    return this.client;
-  }
-
-  /** Calls an MCP tool and parses its JSON text result; reconnects once on a dropped session. */
-  private async call(name: string, args: Json): Promise<Json> {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        const res = await (await this.connected()).callTool({ name, arguments: args }, undefined, { timeout: 60_000 });
-        const text = (res.content as { type: string; text?: string }[]).find((c) => c.type === "text")?.text ?? "";
-        if (res.isError) throw new Error(`Linear ${name}: ${text.slice(0, 300)}`);
-        return JSON.parse(text);
-      } catch (err) {
-        if (err instanceof LoginRequiredError || err instanceof UnauthorizedError) {
-          this.client = null;
-          throw new LoginRequiredError();
-        }
-        await this.client?.close().catch(() => {});
-        this.client = null;
-        if (attempt >= 1 || (err as Error).message.startsWith(`Linear ${name}:`)) throw err;
-      }
-    }
+  private call(name: string, args: Json): Promise<Json> {
+    return this.mcp.call(name, args);
   }
 
   async close() {
-    await this.client?.close().catch(() => {});
-    this.client = null;
+    await this.mcp.close();
   }
 
   async viewer(): Promise<{ id: string; name: string; email: string | null }> {
@@ -187,9 +27,8 @@ export class LinearClient {
 
   /** Drops the connection, cached credentials and cached user, e.g. after signing in or out. */
   async resetAuth() {
-    (this.provider as { reset?: () => void }).reset?.();
     this.meCache = null;
-    await this.close();
+    await this.mcp.reset();
   }
 
   private async listAll(args: Json, maxPages: number): Promise<Json[]> {
@@ -224,7 +63,7 @@ export class LinearClient {
   }
 
   /** Full issue with untruncated description and all comments. */
-  async issue(id: string): Promise<LinearIssue | null> {
+  async issue(id: string): Promise<TrackerIssue | null> {
     let i: Json;
     try {
       i = await this.call("get_issue", {
@@ -236,7 +75,7 @@ export class LinearClient {
       if (/not found/i.test((err as Error).message)) return null;
       throw err;
     }
-    const comments: LinearIssue["comments"] = [];
+    const comments: TrackerIssue["comments"] = [];
     let cursor: string | undefined;
     for (let page = 0; page < 10; page++) {
       const res = await this.call("list_comments", { issueId: i.uuid, limit: 250, orderBy: "createdAt", ...(cursor ? { cursor } : {}) });
@@ -267,10 +106,10 @@ export class LinearClient {
     };
   }
 
-  private meCache: { id: string; name: string; email: string | null; teams: { id: string; name: string; key: string }[] } | null = null;
+  private meCache: Me | null = null;
 
   /** The logged-in user and their teams (cached for the process lifetime). */
-  async me() {
+  async me(): Promise<Me> {
     if (!this.meCache) {
       const u = await this.call("get_user", { query: "me" });
       this.meCache = { id: u.id, name: u.name, email: u.email ?? null, teams: u.teams ?? [] };
