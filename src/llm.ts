@@ -39,7 +39,8 @@ class ClaudeCliLLM implements LLM {
         "--system-prompt", req.system,
         "--json-schema", JSON.stringify(req.schema),
       ],
-      { cwd: this.cwd, stdin: new Blob([req.prompt]), stdout: "pipe", stderr: "pipe" },
+      // env: Bun resolves the binary with the PATH from startup otherwise, which lacks preparePath()'s dirs.
+      { cwd: this.cwd, stdin: new Blob([req.prompt]), stdout: "pipe", stderr: "pipe", env: process.env },
     );
     const timer = setTimeout(() => proc.kill(), 300_000);
     const [stdout, stderr, code] = await Promise.all([

@@ -23,7 +23,7 @@ export const notifyState = { permissionDenied: false };
 
 async function run(argv: string[]): Promise<string | null> {
   try {
-    const proc = Bun.spawn(argv, { stdout: "ignore", stderr: "pipe" });
+    const proc = Bun.spawn(argv, { stdout: "ignore", stderr: "pipe", env: process.env });
     const err = await new Response(proc.stderr).text();
     return (await proc.exited) === 0 ? null : err.trim() || "failed";
   } catch (err) {
