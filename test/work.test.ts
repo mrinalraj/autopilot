@@ -10,7 +10,7 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 const git = (...args: string[]) => Bun.spawnSync(["git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
 
 const base: WorkStatus = {
-  checkedAt: "", worktreePath: "", missing: false, commitsAhead: 0, dirtyFiles: 0, lastCommitAt: null, pr: null, error: null,
+  checkedAt: "", worktreePath: "", missing: false, commitsAhead: 0, unpushed: 0, dirtyFiles: 0, lastCommitAt: null, pr: null, error: null,
 };
 const pr = (state: "OPEN" | "MERGED" | "CLOSED", isDraft = false) => ({ number: 1, url: "u", state, isDraft, title: "t" });
 

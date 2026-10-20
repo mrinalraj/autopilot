@@ -11,12 +11,21 @@ user-facing picture.
 bun test                 # must pass before you finish; the e2e test uses fakes, never real Linear/Supacode
 bun run typecheck        # tsc --noEmit
 bun run once             # one real poll against Linear (needs `bun run login` done)
-launchctl kickstart -k gui/$(id -u)/dev.linear-autopilot   # restart the installed daemon to load changes
+bun run cli service restart   # restart the installed daemon (LaunchAgent dev.linear-autopilot) to load changes
+bun run build            # standalone binaries + tarballs + checksums.txt in dist/
 tail -f logs/autopilot.log
 ```
 
 The daemon normally runs as a LaunchAgent. Don't also start `bun run start` while it's running:
-both bind port 4747.
+both bind port 4747. `src/cli.ts` is the single entry point, both from source and as the compiled
+binary.
+
+Config, state and logs live under `HOME_DIR` (`config.ts`):
+- `AUTOPILOT_HOME` if set
+- otherwise `~/Library/Application Support/linear-autopilot` in the compiled binary
+- otherwise the project folder when running from source.
+
+Never derive paths from `import.meta.dir` elsewhere: inside the binary it's Bun's virtual filesystem.
 
 ## Architecture
 
@@ -37,8 +46,8 @@ both bind port 4747.
   - New columns are added with an `ALTER TABLE` guard in the `Store` constructor.
 - Briefs (`state/briefs/*.md`) are a read-only projection of an `issues` row, regenerated whole by
   `writeBrief`. Never edit them in place.
-- `linear.ts` talks to Linear's hosted MCP server over OAuth (tokens in the Keychain). The workspace
-  forbids personal API keys: don't add a `LINEAR_API_KEY` path. Tool results are JSON text; `list_issues`
+- `linear.ts` talks to Linear's hosted MCP server over OAuth (tokens in the Keychain). Many workspaces forbid
+  personal API keys, so don't add a `LINEAR_API_KEY` path. Tool results are JSON text; `list_issues`
   truncates descriptions, so use `get_issue` for full text.
 - `web.ts` renders server-side HTML. Modals are CSS `:target` (`#m-<identifier>`). One nonce'd
   inline script polls `/state` to update the progress banner, set the Dock badge
@@ -73,6 +82,14 @@ both bind port 4747.
   passes values to `security` over stdin as hex.
 - **Page refreshes:** anything that changes a row bumps `updated_at`, which reloads open pages. For
   periodic data (work checks), only bump on a material change (`setWork(…, bump)`).
+- **Deleting worktrees** goes through Supacode (`removeWorktree`). Never `rm -rf` or
+  `git worktree remove` it ourselves. Always re-check with `checkWork` and refuse on `atRisk`
+  unless forced. Unknown state counts as at risk.
+- **Updates:** release asset names come from `scripts/build.sh` and `assetName()` in `update.ts`;
+  keep them in sync. Installs verify the SHA-256 and the new binary's reported version before
+  swapping, and never run without an explicit user action.
+- **Embedded files:** icons are imported `with { type: "file" }` in `src/pwa.ts`, so they ship
+  inside the binary. Add new static files the same way and route them in `serveStatic`.
 
 ## Conventions
 

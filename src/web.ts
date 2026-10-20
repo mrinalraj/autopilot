@@ -1,11 +1,12 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { join } from "node:path";
-import { PROJECT_DIR } from "./config";
+import { LOG_PATH } from "./config";
+import { ICONS, MANIFEST, offlinePage, SERVICE_WORKER } from "./pwa";
 import { Autopilot } from "./autopilot";
 import type { IssueRow, IssueStatus } from "./db";
 import { log } from "./log";
 import { Store } from "./db";
-import { isSettled, overallStage, stage, type RepoWork, type WorkStage } from "./work";
+import { atRisk, isSettled, overallStage, stage, type RepoWork, type WorkStage } from "./work";
+import type { Updater } from "./updater";
 
 const esc = (s: unknown) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -106,6 +107,21 @@ button:disabled { opacity:.5; cursor:default; filter:none; }
 .spinner { width:15px; height:15px; border:2px solid var(--border-strong); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; flex:none; }
 @keyframes spin { to { transform:rotate(360deg); } }
 .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+
+/* Collapsible lists, update banner, danger zone */
+details.fold { margin-top:28px; }
+details.fold > summary { cursor:pointer; list-style:none; display:flex; align-items:baseline; gap:8px; font-weight:650; font-size:15px; }
+details.fold > summary::-webkit-details-marker { display:none; }
+details.fold > summary::before { content:"▸"; color:var(--muted); font-size:12px; transition:transform .15s; display:inline-block; }
+details.fold[open] > summary::before { transform:rotate(90deg); }
+details.fold > .recent { margin-top:12px; }
+.update { display:flex; align-items:center; gap:12px; flex-wrap:wrap; background:var(--ok-soft); border:1px solid var(--border); border-radius:12px; padding:10px 14px; margin-top:16px; }
+.update form { margin:0; } .update .grow { flex:1; min-width:200px; }
+.notice { border-radius:10px; padding:8px 12px; background:var(--ok-soft); color:var(--ok); font-size:13px; margin-top:14px; }
+details.danger { border:1px solid var(--border); border-radius:12px; padding:12px 16px; background:var(--panel); margin-bottom:14px; }
+details.danger > summary { cursor:pointer; color:var(--bad); font-weight:600; font-size:13px; }
+details.danger ul { margin:8px 0; }
+.check { display:flex; gap:8px; align-items:center; font-size:13px; margin:10px 0; }
 
 /* Misc */
 .alert { border-radius:10px; padding:8px 12px; background:var(--bad-soft); color:var(--bad); white-space:pre-wrap; word-break:break-word; font-size:13px; }
@@ -224,30 +240,30 @@ function page(title: string, body: string): Response {
   });
 }
 
-/** PWA files served from public/ (an allowlist: nothing else on disk is reachable). */
-const STATIC: Record<string, { file: string; type: string; headers?: Record<string, string> }> = {
-  "/manifest.webmanifest": { file: "manifest.webmanifest", type: "application/manifest+json", headers: { "Cache-Control": "no-cache" } },
-  // The worker's own CSP governs its fetches, so it needs 'self' rather than the page's 'none'.
-  "/sw.js": { file: "sw.js", type: "text/javascript", headers: { "Cache-Control": "no-cache", "Content-Security-Policy": "default-src 'self'" } },
-  "/offline.html": {
-    file: "offline.html",
-    type: "text/html; charset=utf-8",
-    headers: { "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'" },
-  },
-  ...Object.fromEntries(
-    ["icon.svg", "icon-maskable.svg", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png", "favicon-32.png"].map((f) => [
-      `/icons/${f}`,
-      { file: `icons/${f}`, type: f.endsWith(".svg") ? "image/svg+xml" : "image/png", headers: { "Cache-Control": "max-age=86400" } },
-    ]),
-  ),
-};
-
-function serveStatic(path: string): Response | null {
-  const entry = STATIC[path];
-  if (!entry) return null;
-  return new Response(Bun.file(join(PROJECT_DIR, "public", entry.file)), {
-    headers: { "Content-Type": entry.type, "X-Content-Type-Options": "nosniff", ...entry.headers },
-  });
+/** PWA routes (an allowlist; nothing else on disk is reachable). Files are embedded when compiled. */
+function serveStatic(path: string, port: number): Response | null {
+  const plain = { "X-Content-Type-Options": "nosniff" };
+  if (path === "/manifest.webmanifest") {
+    return Response.json(MANIFEST, { headers: { ...plain, "Content-Type": "application/manifest+json", "Cache-Control": "no-cache" } });
+  }
+  if (path === "/sw.js") {
+    // The worker's own CSP governs its fetches, so it needs 'self' rather than the page's 'none'.
+    return new Response(SERVICE_WORKER, {
+      headers: { ...plain, "Content-Type": "text/javascript", "Cache-Control": "no-cache", "Content-Security-Policy": "default-src 'self'" },
+    });
+  }
+  if (path === "/offline.html") {
+    return new Response(offlinePage(port, LOG_PATH), {
+      headers: { ...plain, "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'" },
+    });
+  }
+  const icon = path.startsWith("/icons/") ? ICONS[path.slice("/icons/".length)] : undefined;
+  if (icon) {
+    return new Response(Bun.file(icon), {
+      headers: { ...plain, "Content-Type": icon.endsWith(".svg") ? "image/svg+xml" : "image/png", "Cache-Control": "max-age=86400" },
+    });
+  }
+  return null;
 }
 
 const badge = (s: IssueStatus, error?: string | null) => {
@@ -289,7 +305,7 @@ function workSummary(list: RepoWork[] | null): string {
 const repoPills = (r: IssueRow) =>
   `<span class="pill">${esc(r.repo)}</span>${Store.extras(r).map((e) => `<span class="pill extra" title="${esc(e.reason)}">+ ${esc(e.repo)}</span>`).join("")}`;
 
-export function startWeb(ap: Autopilot) {
+export function startWeb(ap: Autopilot, updater?: Updater) {
   const port = ap.cfg.port;
   const csrf = randomBytes(24).toString("hex");
   const allowedHosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`]);
@@ -380,6 +396,40 @@ export function startWeb(ap: Autopilot) {
       ${list.map(repoFacts).join("")}</div>`;
   }
 
+  /** "Delete worktrees…" for launched tickets, listing what would be lost from the latest check. */
+  function deleteBox(r: IssueRow) {
+    if (r.status !== "running" && r.status !== "failed") return "";
+    const wts = Autopilot.worktrees(r);
+    const work = Autopilot.work(r) ?? [];
+    const live = wts.filter((w) => !work.find((x) => x.repo === w.repo)?.missing);
+    if (!live.length) return "";
+    const risks = work.flatMap((w) => atRisk(w).map((x) => `${w.repo}: ${x}`));
+    return `<details class="danger"><summary>Delete worktree${live.length === 1 ? "" : "s"}…</summary>
+      <p class="small muted" style="margin:8px 0 4px">Removes ${live.length === 1 ? "this worktree" : "these worktrees"} through Supacode, which also closes the Claude session in ${live.length === 1 ? "it" : "them"}. The branch, commits already pushed, and any PR stay; PR tracking carries on.</p>
+      <ul class="small">${live.map((w) => `<li><code>${esc(decodeURIComponent(w.worktreeId).replace(/\/$/, ""))}</code></li>`).join("")}</ul>
+      ${risks.length ? `<div class="alert">At the last check this would lose: ${esc(risks.join(", "))}. It's re-checked before deleting.</div>` : ""}
+      <form method="post" action="${actionBase(r)}/delete-worktrees">${tokenField}
+        <label class="check"><input type="checkbox" name="force" value="1"> Delete anyway, even with uncommitted or unpushed work</label>
+        <button class="ghost-danger" type="submit">Delete worktree${live.length === 1 ? "" : "s"}</button></form>
+    </details>`;
+  }
+
+  function updateBanner(): string {
+    if (!updater) return "";
+    const u = updater.info;
+    if (updater.status === "updating") return `<div class="update"><div class="spinner"></div><strong>Updating to ${esc(u?.latest)}…</strong></div>`;
+    if (updater.status === "restarting") return `<div class="update"><div class="spinner"></div><strong>Restarting into ${esc(u?.latest)}…</strong></div>`;
+    const err = updater.status === "error" && updater.error ? `<div class="alert" style="margin-top:14px">Update: ${esc(updater.error)}</div>` : "";
+    if (!u?.available) return err;
+    const action =
+      u.kind === "source"
+        ? `<span class="small muted">Running from source: <code>git pull</code> and restart</span>`
+        : `<form method="post" action="/update">${tokenField}<button class="primary">${u.kind === "homebrew" ? "Update via Homebrew" : "Update now"}</button></form>`;
+    return `<div class="update"><div class="grow"><strong>Update available: ${esc(u.latest)}</strong>
+        <span class="muted small"> · you have ${esc(u.current)} · <a href="${esc(u.url)}" target="_blank" rel="noreferrer">release notes ↗</a></span></div>
+        ${action}</div>${err}`;
+  }
+
   function modal(r: IssueRow) {
     const ex = Autopilot.explainer(r);
     const t = Autopilot.ticket(r);
@@ -442,6 +492,7 @@ export function startWeb(ap: Autopilot) {
                 <p><strong>Approach.</strong> ${esc(ex.approach)}</p>
                 <strong class="small">Likely areas</strong><ul class="small">${ex.likely_areas.map((a) => `<li><code>${esc(a)}</code></li>`).join("")}</ul></div>
               ${r.status === "running" ? progressBox(r) : ""}
+              ${deleteBox(r)}
               <div class="box"><h3>Launch</h3>${form}
                 <p class="small muted" style="margin:14px 0 0">Brief for the session: <code>${esc(r.brief_path)}</code></p></div>
             </div>
@@ -472,17 +523,16 @@ export function startWeb(ap: Autopilot) {
     const v = ap.store.db
       .query<{ n: number; t: string | null }, []>("SELECT COUNT(*) AS n, MAX(updated_at) AS t FROM issues")
       .get();
-    return `${v?.n ?? 0}|${v?.t ?? ""}|${ap.lastPollError ?? ""}`;
+    return `${v?.n ?? 0}|${v?.t ?? ""}|${ap.lastPollError ?? ""}|${updater?.status ?? ""}|${updater?.info?.latest ?? ""}`;
   }
 
-  function indexPage(error?: string) {
+  function indexPage(error?: string, notice?: string) {
     const queue = ap.store.listByStatus(["pending", "failed"]);
     const launching = ap.store.listByStatus(["approved"]);
     const running = ap.store.listByStatus(["running"], 200);
     const inProgress = running.filter((r) => !isSettled(Autopilot.work(r)));
-    const recent = [...running.filter((r) => isSettled(Autopilot.work(r))), ...ap.store.listByStatus(["rejected"], 20)]
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-      .slice(0, 20);
+    const completed = running.filter((r) => isSettled(Autopilot.work(r)));
+    const rejected = ap.store.listByStatus(["rejected"], 100);
     const prsOpen = inProgress.flatMap((r) => Autopilot.work(r) ?? []).filter((w) => w.pr?.state === "OPEN").length;
     const banner = progressBanner();
     const next = ap.lastPollAt ? time(new Date(Date.parse(ap.lastPollAt) + ap.cfg.pollIntervalSeconds * 1000).toISOString()) : null;
@@ -497,7 +547,9 @@ export function startWeb(ap: Autopilot) {
        <div class="stats"><div class="stat"><b>${queue.length}</b><span>Awaiting</span></div>
          <div class="stat"><b>${inProgress.length}</b><span>In progress</span></div>
          <div class="stat"><b>${prsOpen}</b><span>PRs open</span></div></div>
+       ${updateBanner()}
        <div id="live" data-version="${esc(version())}" data-awaiting="${queue.length}">${banner.html}</div>
+       ${notice ? `<div class="notice">${esc(notice)}</div>` : ""}
        ${ap.lastPollError ? `<div class="alert" style="margin-top:14px">Last poll failed: ${esc(ap.lastPollError)}</div>` : ""}
        ${error ? `<div class="alert" style="margin-top:14px">${esc(error)}</div>` : ""}
        <div class="section"><h2>Awaiting approval</h2><span class="count">${queue.length}</span></div>
@@ -505,8 +557,9 @@ export function startWeb(ap: Autopilot) {
          : `<div class="empty"><b>All clear</b>New tickets assigned to you in ${esc(picks)} will show up here.</div>`}
        ${launching.length ? `<div class="section"><h2>Launching</h2><span class="count">${launching.length}</span></div><div class="grid">${launching.map(card).join("")}</div>` : ""}
        ${inProgress.length ? `<div class="section"><h2>In progress</h2><span class="count">${inProgress.length}</span></div><div class="grid">${inProgress.map(workCard).join("")}</div>` : ""}
-       ${recent.length ? `<div class="section"><h2>Recent</h2></div><div class="recent">${recent.map(recentItem).join("")}</div>` : ""}
-       ${[...queue, ...launching, ...inProgress, ...recent].map(modal).join("")}`,
+       ${completed.length ? `<details class="fold"><summary>Completed <span class="count">${completed.length}</span></summary><div class="recent">${completed.map(recentItem).join("")}</div></details>` : ""}
+       ${rejected.length ? `<details class="fold"><summary>Rejected &amp; dismissed <span class="count">${rejected.length}</span></summary><div class="recent">${rejected.map(recentItem).join("")}</div></details>` : ""}
+       ${[...queue, ...launching, ...inProgress, ...completed, ...rejected].map(modal).join("")}`,
     );
   }
 
@@ -529,6 +582,16 @@ export function startWeb(ap: Autopilot) {
           void ap.poll().then(() => ap.refreshWork());
           return redirect("/");
         }
+        if (path === "/update") {
+          const res = updater ? updater.install() : { ok: false as const, error: "updates are not available here" };
+          return redirect(res.ok ? "/" : `/?error=${encodeURIComponent(`Update: ${res.error}`)}`);
+        }
+        const del = path.match(/^\/issues\/([^/]+)\/delete-worktrees$/);
+        if (del) {
+          const identifier = decodeURIComponent(del[1]);
+          const res = await ap.deleteWorktrees(identifier, form.get("force") === "1");
+          return redirect(res.ok ? `/?notice=${encodeURIComponent(res.message)}` : `/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}#${modalId(identifier)}`);
+        }
         const m = path.match(/^\/issues\/([^/]+)\/(approve|reject)$/);
         if (m) {
           const identifier = decodeURIComponent(m[1]);
@@ -546,12 +609,12 @@ export function startWeb(ap: Autopilot) {
         const awaiting = ap.store.listByStatus(["pending", "failed"]).length;
         return Response.json({ polling: ap.polling, progress: ap.progress, version: version(), awaiting }, { headers: { "Cache-Control": "no-store" } });
       }
-      const file = serveStatic(path);
+      const file = serveStatic(path, port);
       if (file) return file;
       if (path === "/healthz") {
         return Response.json({ ok: true, lastPollAt: ap.lastPollAt, lastPollError: ap.lastPollError, progress: ap.progress });
       }
-      if (path === "/") return indexPage(url.searchParams.get("error") ?? undefined);
+      if (path === "/") return indexPage(url.searchParams.get("error") ?? undefined, url.searchParams.get("notice") ?? undefined);
       // Old links: open the item's modal on the list page.
       const m = path.match(/^\/issues\/([^/]+)$/);
       if (m) return redirect(`/#${modalId(decodeURIComponent(m[1]))}`);

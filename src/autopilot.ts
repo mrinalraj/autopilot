@@ -6,9 +6,9 @@ import { loadCatalog, type RepoEntry } from "./catalog";
 import { explain, resolveRepo, type Explainer } from "./triage";
 import { briefPath, initPrompt, removeBrief, snapshot, writeBrief, type TicketSnapshot } from "./brief";
 import { isValidBranch, normalizeBranch } from "./branch";
-import { ensureWorktree, openClaudeTab } from "./launch";
+import { ensureWorktree, openClaudeTab, removeWorktree } from "./launch";
 import { notify } from "./notify";
-import { checkWork, isSettled, workFingerprint, type RepoWork } from "./work";
+import { atRisk, checkWork, isSettled, workFingerprint, type RepoWork } from "./work";
 import { log } from "./log";
 
 export const CURSOR_KEY = "poll_cursor";
@@ -66,15 +66,16 @@ export class Autopilot {
 
   private checkingWork = false;
 
-  /** Re-reads commits and PR state for every launched item. */
-  async refreshWork(): Promise<void> {
-    if (this.checkingWork) return;
-    this.checkingWork = true;
+  /** Re-reads commits and PR state for every unsettled launched item, or just `only` (settled or not). */
+  async refreshWork(only?: string): Promise<void> {
+    if (this.checkingWork && !only) return;
+    if (!only) this.checkingWork = true;
     try {
-      for (const row of this.store.listByStatus(["running"], 200)) {
+      const rows = only ? [this.store.getIssue(only)].filter((r): r is IssueRow => !!r) : this.store.listByStatus(["running"], 200);
+      for (const row of rows) {
         if (!row.worktree_id) continue;
         const prev = Autopilot.work(row);
-        if (isSettled(prev)) continue;
+        if (isSettled(prev) && !only) continue;
         try {
           const repos = [
             { repo: row.repo, repoPath: row.repo_path, worktreeId: row.worktree_id },
@@ -93,7 +94,7 @@ export class Autopilot {
         }
       }
     } finally {
-      this.checkingWork = false;
+      if (!only) this.checkingWork = false;
     }
   }
 
@@ -313,6 +314,45 @@ export class Autopilot {
       log.error(`launch failed for ${row.identifier}`, err);
       this.store.updateIssue(row.linear_id, { status: "failed", error: msg });
     }
+  }
+
+  /** Worktrees a launched ticket owns: primary first, then the extra repos'. */
+  static worktrees(row: IssueRow): { repo: string; repoPath: string; worktreeId: string }[] {
+    return [
+      ...(row.worktree_id ? [{ repo: row.repo, repoPath: row.repo_path, worktreeId: row.worktree_id }] : []),
+      ...Store.extras(row).flatMap((e) => (e.worktree_id ? [{ repo: e.repo, repoPath: e.repo_path, worktreeId: e.worktree_id }] : [])),
+    ];
+  }
+
+  /**
+   * Deletes a ticket's worktrees through Supacode. Re-checks each one first and refuses, unless
+   * `force`, when any has uncommitted changes or unpushed commits. PR tracking carries on.
+   */
+  async deleteWorktrees(identifier: string, force: boolean): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+    const row = this.store.getIssueByIdentifier(identifier);
+    if (!row) return { ok: false, error: "unknown issue" };
+    const wts = Autopilot.worktrees(row);
+    if (!wts.length) return { ok: false, error: "no worktrees to delete" };
+
+    const checks = await Promise.all(wts.map(async (w) => ({ ...w, work: await checkWork(w.worktreeId, w.repoPath, row.branch) })));
+    const live = checks.filter((c) => !c.work.missing);
+    if (!live.length) return { ok: false, error: "the worktrees are already gone" };
+    const risks = live.flatMap((c) => atRisk(c.work).map((r) => `${c.repo}: ${r}`));
+    if (risks.length && !force) return { ok: false, error: `not deleted, it would lose ${risks.join(", ")}; tick "delete anyway" to confirm` };
+
+    const failed: string[] = [];
+    for (const c of live) {
+      try {
+        await removeWorktree(this.cfg, c.worktreeId);
+        log.info(`${row.identifier}: deleted worktree ${c.work.worktreePath}`);
+      } catch (err) {
+        failed.push(`${c.repo}: ${(err as Error).message}`);
+      }
+    }
+    // A deleted worktree with an open PR stays in progress; PR tracking carries on from the main repo.
+    await this.refreshWork(row.linear_id);
+    if (failed.length) return { ok: false, error: `could not delete: ${failed.join("; ")}` };
+    return { ok: true, message: `Deleted ${live.length} worktree${live.length === 1 ? "" : "s"} for ${row.identifier}.` };
   }
 
   reject(identifier: string): { ok: true } | { ok: false; error: string } {

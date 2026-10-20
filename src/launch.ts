@@ -104,6 +104,15 @@ export async function ensureWorktree(cfg: Config, repoPath: string, branch: stri
   throw new Error(`Supacode did not create the worktree for ${repoPath} within 180s (deeplink)`);
 }
 
+/** Removes a worktree through Supacode, which also closes its terminals (and the Claude session). */
+export async function removeWorktree(cfg: Config, worktreeId: string): Promise<void> {
+  if (useCli(cfg)) {
+    await run([cfg.launch.supacodeBin, "worktree", "delete", "-w", worktreeId, "--background", "--timeout", "120"], 150_000);
+    return;
+  }
+  await run(["open", `supacode://worktree/${worktreeId}/delete?background=true`], 30_000);
+}
+
 /** Opens a tab in the worktree running `claude` with the init prompt. */
 export async function openClaudeTab(cfg: Config, req: TabRequest): Promise<void> {
   const command = claudeCommand(cfg, req);

@@ -3,11 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "repository": "mrinalraj/linear-autopilot",
+  "bin": {
+    "linear-autopilot": "src/cli.ts"
+  },
   "scripts": {
-    "start": "bun run src/main.ts",
-    "once": "bun run src/main.ts --once",
-    "login": "bun run src/login.ts",
-    "reset": "bun run src/reset.ts",
+    "start": "bun run src/cli.ts start",
+    "once": "bun run src/cli.ts once",
+    "login": "bun run src/cli.ts login",
+    "reset": "bun run src/cli.ts reset",
+    "cli": "bun run src/cli.ts",
+    "build": "scripts/build.sh",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

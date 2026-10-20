@@ -6,6 +6,8 @@ export interface WorkStatus {
   worktreePath: string;
   missing: boolean;
   commitsAhead: number | null;
+  /** Commits not on the remote: ahead of the upstream, or all of them if never pushed. */
+  unpushed: number | null;
   dirtyFiles: number | null;
   lastCommitAt: string | null;
   pr: { number: number; url: string; state: "OPEN" | "MERGED" | "CLOSED"; isDraft: boolean; title: string } | null;
@@ -35,6 +37,7 @@ export async function checkWork(worktreeId: string, repoPath: string, branch: st
     worktreePath,
     missing: !existsSync(worktreePath),
     commitsAhead: null,
+    unpushed: null,
     dirtyFiles: null,
     lastCommitAt: null,
     pr: null,
@@ -43,14 +46,20 @@ export async function checkWork(worktreeId: string, repoPath: string, branch: st
   const errors: string[] = [];
 
   if (!status.missing) {
-    try {
-      const base = await out(["git", "rev-parse", "--abbrev-ref", "origin/HEAD"], worktreePath).catch(() => "origin/main");
-      status.commitsAhead = Number(await out(["git", "rev-list", "--count", `${base}..HEAD`], worktreePath));
-      status.dirtyFiles = (await out(["git", "status", "--porcelain"], worktreePath)).split("\n").filter(Boolean).length;
-      if (status.commitsAhead > 0) status.lastCommitAt = (await out(["git", "log", "-1", "--format=%cI"], worktreePath)) || null;
-    } catch (err) {
+    // Each check stands alone so one failing (e.g. no origin) can't hide another, like dirty files.
+    const git = (...args: string[]) => out(["git", ...args], worktreePath).catch((err) => {
       errors.push((err as Error).message);
-    }
+      return null;
+    });
+    const dirty = await git("status", "--porcelain");
+    if (dirty !== null) status.dirtyFiles = dirty.split("\n").filter(Boolean).length;
+    const base = (await out(["git", "rev-parse", "--abbrev-ref", "origin/HEAD"], worktreePath).catch(() => null)) ?? "origin/main";
+    const ahead = await git("rev-list", "--count", `${base}..HEAD`);
+    if (ahead !== null) status.commitsAhead = Number(ahead);
+    if (status.commitsAhead) status.lastCommitAt = (await git("log", "-1", "--format=%cI")) || null;
+    status.unpushed = await out(["git", "rev-list", "--count", "@{u}..HEAD"], worktreePath)
+      .then(Number)
+      .catch(() => status.commitsAhead);
   }
 
   // gh resolves the GitHub repo from the checkout's remote; the main repo works if the worktree is gone.
@@ -66,6 +75,17 @@ export async function checkWork(worktreeId: string, repoPath: string, branch: st
 
   status.error = errors.length ? errors.join("; ") : null;
   return status;
+}
+
+/** Work that deleting this worktree would lose; empty when it's safe. A merged/closed PR is safe. */
+export function atRisk(w: WorkStatus): string[] {
+  if (w.missing) return [];
+  if (w.dirtyFiles === null) return ["state couldn't be verified"];
+  const risks: string[] = [];
+  if (w.dirtyFiles) risks.push(`${w.dirtyFiles} uncommitted file${w.dirtyFiles === 1 ? "" : "s"}`);
+  const settledPr = w.pr && w.pr.state !== "OPEN";
+  if (w.unpushed && !settledPr) risks.push(`${w.unpushed} unpushed commit${w.unpushed === 1 ? "" : "s"}`);
+  return risks;
 }
 
 export function stage(w: WorkStatus): WorkStage {

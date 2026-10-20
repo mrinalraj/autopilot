@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
@@ -207,6 +207,32 @@ test("a multi-repo ticket gets a worktree per repo and one session with the othe
   expect(calls).toContain("the others are frontend at /tmp/wt/frontend/widget-everywhere-eng-6.");
   expect(calls).toMatch(/--add-dir '[^']+briefs' '\/tmp\/wt\/frontend\/widget-everywhere-eng-6'\n/);
   expect(readFileSync(done.brief_path, "utf8")).toContain("worktree `/tmp/wt/frontend/widget-everywhere-eng-6`");
+});
+
+test("delete worktrees refuses to lose work unless forced, then removes them via Supacode", async () => {
+  const wtRoot = join(dir, "wt");
+  process.env.FAKE_SC_WT_ROOT = wtRoot;
+  linear.add("del", ME); // ENG-7
+  await ap.poll();
+  ap.approve("ENG-7", "backend", "delete me");
+  await waitFor(() => store.getIssueByIdentifier("ENG-7")!.status !== "approved");
+  const wt = join(wtRoot, "backend", "delete-me-eng-7");
+  mkdirSync(wt, { recursive: true });
+  Bun.spawnSync(["git", "init", "-q", wt]);
+  writeFileSync(join(wt, "wip.txt"), "unsaved");
+
+  const refused = await ap.deleteWorktrees("ENG-7", false);
+  expect(refused.ok).toBe(false);
+  expect((refused as { error: string }).error).toContain("backend: 1 uncommitted file");
+  expect(existsSync(wt)).toBe(true);
+
+  const done = await ap.deleteWorktrees("ENG-7", true);
+  expect(done).toEqual({ ok: true, message: "Deleted 1 worktree for ENG-7." });
+  expect(readFileSync(scLog, "utf8")).toContain(`worktree delete -w ${supacodeId(wt)} --background`);
+  expect(existsSync(wt)).toBe(false);
+  expect(Autopilot.work(store.getIssueByIdentifier("ENG-7")!)?.[0].missing).toBe(true);
+  expect(await ap.deleteWorktrees("ENG-7", true)).toEqual({ ok: false, error: "the worktrees are already gone" });
+  delete process.env.FAKE_SC_WT_ROOT;
 });
 
 test("a rejected ticket is re-proposed only after being reassigned", async () => {

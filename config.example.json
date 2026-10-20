@@ -14,7 +14,7 @@
   "llm": {
     "provider": "cli",
     "model": "claude-opus-5-5",
-    "claudeBin": "/opt/homebrew/bin/claude"
+    "claudeBin": "claude"
   },
   "launch": {
     "supacodeBin": "/Applications/supacode.app/Contents/Resources/bin/supacode",

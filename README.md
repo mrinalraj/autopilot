@@ -3,7 +3,7 @@
 A local macOS daemon that turns Linear tickets into Claude Code sessions, with you approving each one.
 
 It watches Linear for tickets assigned to you in **Ready for Development**. For each one it picks
-the repo under `~/code`, plus any other repos the ticket also changes. It proposes a branch,
+the repo in your code folder (`reposRoot`), plus any other repos the ticket also changes. It proposes a branch,
 writes a short explainer, then asks you to approve or reject it on a local web page. When you
 approve, Supacode creates a worktree on that branch in every repo involved (its own branch creation
 and hooks run). A Claude Code session opens in the primary repo with the other worktrees added, so
@@ -19,16 +19,29 @@ Linear (MCP, OAuth) ──▶ newly eligible ticket ──▶ triage: repo + bra
 
 ## Quick start
 
-Requirements: macOS, [Bun](https://bun.sh), the Supacode app, the Claude Code CLI (logged in), and
-`gh` (logged in) for PR tracking.
+Requirements: macOS, the Supacode app, the Claude Code CLI (logged in), and `gh` (logged in) for
+PR tracking.
+
+With the standalone binary (from a release, or `bun run build`):
+
+```sh
+linear-autopilot login              # one-time browser OAuth to Linear; tokens go to the Keychain
+linear-autopilot once               # one poll in the foreground to check the setup
+linear-autopilot service install    # LaunchAgent: starts at login, restarts on crash
+linear-autopilot open
+```
+
+The binary keeps its config, state and logs in `~/Library/Application Support/linear-autopilot/`
+(`linear-autopilot paths` shows them). Copy `config.example.json` there as `config.json` to
+customise it.
+
+From source, which needs [Bun](https://bun.sh) and keeps everything in the project folder:
 
 ```sh
 bun install
-cp config.example.json config.json   # adjust if needed (see Configuration)
-bun run login                        # one-time browser OAuth to Linear; tokens go to the Keychain
-bun run once                         # one poll in the foreground to check the setup
-scripts/install-launchd.sh           # run as a LaunchAgent: starts on login, restarts on crash
-open http://localhost:4747
+cp config.example.json config.json
+bun run login && bun run once
+bun run cli service install
 ```
 
 On the very first poll, tickets that are *already* eligible are only recorded, not proposed, so
@@ -78,8 +91,16 @@ http://localhost:4747 has three sections.
   - with buttons for the PR on GitHub and **Open worktree**, which jumps to it in Supacode.
   - For multi-repo tickets: one line and one PR button per repo. The overall stage ignores repos the
     agent never touched, and the ticket is done once every touched repo's PR is merged or closed.
-- **Recent:** merged or closed PRs, rejected tickets, and *dismissed* tickets, meaning ones that
-  left Ready for Development or were reassigned before you acted.
+- **Completed** (collapsible): every launched ticket whose PRs are merged or closed, or whose
+  worktrees are gone, with links to its PRs.
+- **Rejected & dismissed** (collapsible): rejected tickets, and *dismissed* tickets, meaning ones
+  that left Ready for Development or were reassigned before you acted.
+- **Delete worktrees…** (in a launched ticket's modal): removes its worktrees through Supacode,
+  which also closes the Claude session in them. Before deleting, each worktree is re-checked. If
+  any has uncommitted files or unpushed commits (or its state can't be read), the delete is refused
+  unless you tick "delete anyway". A merged or closed PR counts as safe. The branch and PR are
+  kept, and PR tracking carries on.
+- **Update available** banner: see Updates.
 
 While a poll or triage is running, a progress bar shows which ticket is being processed (for
 example "Triaging ENG-2417 · 2 of 4"). The page updates itself, but never reloads while a modal is
@@ -87,17 +108,48 @@ open. **Poll now** checks Linear and refreshes PR state immediately.
 
 ## Commands
 
+`linear-autopilot <command>` (from source: `bun run cli <command>`):
+
 | Command | What it does |
 | --- | --- |
-| `bun run start` | Run the daemon and page in the foreground. Don't run it alongside the LaunchAgent: they share the port. |
-| `bun run once` | One poll and triage pass, then exit. |
-| `bun run login [--force]` | Browser OAuth to Linear. `--force` discards stored credentials first. |
-| `bun run reset` | Clear every ticket that hasn't been launched (pending, failed, rejected, dismissed) and its brief, then queue the tickets eligible right now for a fresh triage. Launched tickets and their PR tracking are kept. Click **Poll now** afterwards to triage straight away. Safe while the daemon runs. |
-| `bun test` / `bun run typecheck` | Tests and type check. |
-| `scripts/install-launchd.sh` / `scripts/uninstall-launchd.sh` | Install or remove the LaunchAgent `dev.linear-autopilot`. |
-| `launchctl kickstart -k gui/$(id -u)/dev.linear-autopilot` | Restart the agent after changing code or config. |
+| `start` | Run the daemon and page in the foreground (what the service runs). Don't run it alongside the service: they share the port. |
+| `once` | One poll and triage pass, then exit. |
+| `login [--force]` | Browser OAuth to Linear. `--force` discards stored credentials first. |
+| `reset` | Clear every ticket that hasn't been launched (pending, failed, rejected, dismissed) and its brief, then queue the tickets eligible right now for a fresh triage. Launched tickets and their PR tracking are kept. Click **Poll now** afterwards to triage straight away. Safe while the daemon runs. |
+| `update [--check]` | Install the latest release (`--check` only reports). |
+| `service install` / `uninstall` / `restart` / `status` | Manage the LaunchAgent `dev.linear-autopilot`. Run `install` again after moving the binary. |
+| `open` / `paths` / `version` | Open the page; show where config, state and logs live; print the version. |
 
-Logs: `logs/autopilot.log` (not rotated). Health check: `curl localhost:4747/healthz`.
+Development: `bun test`, `bun run typecheck`, `bun run build`.
+
+Logs: `logs/autopilot.log` under the home folder (not rotated). Health check:
+`curl localhost:4747/healthz`.
+
+## Updates
+
+The daemon checks GitHub Releases (`repository` in `package.json`) once a day. When a newer
+version exists, the page shows an **Update available** banner with the release notes.
+
+- **Standalone binary:** **Update now** downloads this Mac's build and checks its SHA-256 against
+  the release's `checksums.txt`. It also confirms the new binary reports the expected version
+  before swapping it in place. The service then restarts into it.
+- **Homebrew install:** the button runs `brew upgrade linear-autopilot`.
+- **Running from source:** the banner just says to `git pull`.
+
+Nothing installs without a click. `linear-autopilot update --check` does the same check from the
+command line.
+
+## Building and releasing
+
+`bun run build` (`scripts/build.sh`) compiles standalone binaries for Apple Silicon and Intel into
+`dist/`:
+
+- `linear-autopilot-<version>-darwin-{arm64,x64}.tar.gz`, each containing the `linear-autopilot`
+  binary with the PWA assets embedded
+- `checksums.txt`
+
+To release, bump `version` in `package.json`, build, and attach those three files to a GitHub
+release tagged `v<version>`. The updater relies on exactly these names.
 
 ## How it works
 
@@ -213,8 +265,9 @@ Ticket text is untrusted, and it ends up in front of an agent with shell access.
 - **"Linear login required"** on the page or in the log: run `bun run login`.
 - **`forbidden origin` or `bad csrf token`:** reload the page. The CSRF token changes whenever the
   daemon restarts.
-- **Page not loading after an install or restart:** check `logs/autopilot.log`. A second copy started
-  with `bun run start` will fail to bind the port.
+- **Page not loading after an install or restart:** check the log (`linear-autopilot paths`). A second
+  copy started by hand will fail to bind the port; `linear-autopilot service status` shows whether
+  the service is running.
 - **No notifications:** allow terminal-notifier (see Quick start).
 - **A ticket you expected isn't showing:** it must be assigned to you *and* in a `pickupStates`
   status, and it must have *become* eligible after the first poll. `bun run reset` re-queues
@@ -229,19 +282,23 @@ bun run typecheck
 
 | Path | Role |
 | --- | --- |
-| `src/main.ts` | Daemon entrypoint: web page, poll loop, work-check loop |
+| `src/cli.ts` | Command-line entry (and the compiled binary's) |
+| `src/daemon.ts` | Daemon: web page, poll loop, work-check loop, update checks |
+| `src/update.ts` / `src/updater.ts` | Release checks and in-place installs / the daemon's update state |
+| `src/service.ts` / `src/env.ts` | LaunchAgent install / PATH and secrets setup for launchd |
+| `src/pwa.ts` | Manifest, service worker, offline page, embedded icons |
 | `src/autopilot.ts` | Detection, triage, approve, reject, launch orchestration |
 | `src/linear.ts` | Linear MCP client and Keychain OAuth provider |
-| `src/login.ts` / `src/reset.ts` | `bun run login` / `bun run reset` |
+| `src/login.ts` / `src/reset.ts` | `login` / `reset` commands |
 | `src/triage.ts` / `src/llm.ts` | Triage prompts and schemas / `claude -p` and API backends |
 | `src/branch.ts` | Branch name validation and repair |
 | `src/brief.ts` | Brief rendering (DB row → Markdown) |
 | `src/launch.ts` | git fetch and the Supacode CLI (deeplink fallback) |
 | `src/work.ts` | Commit and PR tracking for launched tickets |
 | `src/web.ts` | Approval page, live-update script, `/state`, PWA file routes |
-| `public/` | PWA files: manifest, service worker, offline page, icons |
+| `public/icons/` | App icons (embedded into the binary) |
 | `src/db.ts` | SQLite schema, migrations and queries |
 | `src/catalog.ts` | Repo catalog |
 | `src/notify.ts` / `src/keychain.ts` / `src/config.ts` / `src/log.ts` | Helpers |
-| `scripts/` | `run.sh` (LaunchAgent entry), launchd install and uninstall |
+| `scripts/build.sh` | Release build |
 | `test/` | Tests; `fake-supacode.sh` stands in for the Supacode CLI |

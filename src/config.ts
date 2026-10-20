@@ -2,7 +2,25 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-export const PROJECT_DIR = resolve(import.meta.dir, "..");
+function expandHome(p: string): string {
+  return p === "~" ? homedir() : p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
+}
+
+/** True inside a `bun build --compile` binary, where sources live in Bun's virtual filesystem. */
+export const COMPILED = import.meta.url.includes("$bunfs") || import.meta.dir.includes("~BUN");
+
+/**
+ * Where config.json, state/ and logs/ live: AUTOPILOT_HOME if set, Application Support for the
+ * compiled app, and the project directory when running from source.
+ */
+export const HOME_DIR = process.env.AUTOPILOT_HOME
+  ? expandHome(process.env.AUTOPILOT_HOME)
+  : COMPILED
+    ? join(homedir(), "Library", "Application Support", "linear-autopilot")
+    : resolve(import.meta.dir, "..");
+
+export const CONFIG_PATH = process.env.AUTOPILOT_CONFIG ?? join(HOME_DIR, "config.json");
+export const LOG_PATH = join(HOME_DIR, "logs", "autopilot.log");
 
 export interface Config {
   pollIntervalSeconds: number;
@@ -50,7 +68,7 @@ const DEFAULTS: Config = {
   port: 4747,
   oauthCallbackPort: 4748,
   reposRoot: join(homedir(), "code"),
-  stateDir: join(PROJECT_DIR, "state"),
+  stateDir: join(HOME_DIR, "state"),
   briefsDir: "",
   linearUserId: "",
   pickupStates: ["Ready for Development"],
@@ -72,11 +90,7 @@ const DEFAULTS: Config = {
   repos: {},
 };
 
-function expandHome(p: string): string {
-  return p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
-}
-
-export function loadConfig(path = process.env.AUTOPILOT_CONFIG ?? join(PROJECT_DIR, "config.json")): Config {
+export function loadConfig(path = CONFIG_PATH): Config {
   const user = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
   const cfg: Config = {
     ...DEFAULTS,
