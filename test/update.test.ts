@@ -58,6 +58,11 @@ test("version comparison", () => {
   expect(u.newer("v1.0.0", "0.9.9")).toBe(true);
   expect(u.newer("0.1.0", "0.1.0")).toBe(false);
   expect(u.newer("0.1.0", "0.10.0")).toBe(false);
+  expect(u.newer("0.1.0", "0.1.0-beta.1")).toBe(true);
+  expect(u.newer("0.1.0-beta.2", "0.1.0-beta.1")).toBe(true);
+  expect(u.newer("0.1.0-beta.10", "0.1.0-beta.9")).toBe(true);
+  expect(u.newer("0.1.0-beta.1", "0.1.0")).toBe(false);
+  expect(u.newer("v0.1.0-beta.1", "0.1.0-beta.1")).toBe(false);
 });
 
 test("finds the newer release and this machine's asset", async () => {

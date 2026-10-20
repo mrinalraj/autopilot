@@ -34,12 +34,21 @@ export interface UpdateInfo {
 export const installKind = (execPath = process.execPath): InstallKind =>
   !COMPILED ? "source" : execPath.includes("/Cellar/") ? "homebrew" : "standalone";
 
-/** Numeric x.y.z comparison; pre-release suffixes are ignored. */
+/**
+ * Semver-style comparison: x.y.z numerically, then a release beats its pre-releases
+ * (0.1.0 > 0.1.0-beta.2 > 0.1.0-beta.1).
+ */
 export function newer(a: string, b: string): boolean {
-  const parse = (v: string) => v.replace(/^v/, "").split(/[.-]/).slice(0, 3).map((n) => Number(n) || 0);
+  const parse = (v: string) => {
+    const [core, pre = ""] = v.replace(/^v/, "").split("-", 2);
+    return { nums: core.split(".").slice(0, 3).map((n) => Number(n) || 0), pre };
+  };
   const [x, y] = [parse(a), parse(b)];
-  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i];
-  return false;
+  for (let i = 0; i < 3; i++) if ((x.nums[i] ?? 0) !== (y.nums[i] ?? 0)) return (x.nums[i] ?? 0) > (y.nums[i] ?? 0);
+  if (x.pre === y.pre) return false;
+  if (!x.pre) return true; // a release is newer than any of its pre-releases
+  if (!y.pre) return false;
+  return x.pre.localeCompare(y.pre, undefined, { numeric: true }) > 0;
 }
 
 export const assetName = (ver: string, arch = process.arch === "arm64" ? "arm64" : "x64") =>
