@@ -1,5 +1,6 @@
-import { mkdirSync } from "node:fs";
-import { baseUrl, type Config } from "./config";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { baseUrl, HOME_DIR, type Config } from "./config";
 import { MAX_ATTEMPTS, Store, type ExtraRepo, type IssueRow } from "./db";
 import { CLOSED_STATE_TYPES, LoginRequiredError, type Tracker, type TrackerIssue } from "./tracker";
 import type { LLM } from "./llm";
@@ -64,6 +65,41 @@ export class Autopilot {
     for (const row of this.store.listByStatus(["approved"])) {
       this.store.updateIssue(row.linear_id, { status: "failed", error: "daemon restarted during launch; approve again to retry" });
     }
+  }
+
+  /** Set by eraseAll: the next first run triages what's already eligible, since that's what the user wants back. */
+  private queueExistingOnce = false;
+  private queueExisting = () => this.cfg.processExistingOnFirstRun || this.queueExistingOnce;
+
+  /**
+   * Erases every ticket (launched and imported too), brief, cache and dismissed tip, for every
+   * tracker; sign-ins (Keychain) and config.json stay. Deletes only files the app itself writes,
+   * never worktrees. The next poll is a first run that triages what's eligible now.
+   */
+  async eraseAll(beforeReopen?: () => void): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.polling || this.checkingWork || launchSteps.size || this.signingIn) {
+      return { ok: false, error: "busy with a check, launch or sign-in; try again in a moment" };
+    }
+    this.store.db.close();
+    const stateDirs = new Set([this.cfg.stateDir, join(HOME_DIR, "state"), join(HOME_DIR, "state", "jira")]);
+    for (const dir of stateDirs) {
+      for (const f of ["autopilot.sqlite", "autopilot.sqlite-wal", "autopilot.sqlite-shm", "catalog.cache.json"]) rmSync(join(dir, f), { force: true });
+      for (const d of ["briefs", "workspaces"]) rmSync(join(dir, d), { recursive: true, force: true });
+    }
+    beforeReopen?.(); // e.g. settings reset, which may move stateDir/briefsDir back to the defaults
+    // A custom briefsDir may hold other files: remove only briefs.
+    if (existsSync(this.cfg.briefsDir)) {
+      for (const f of readdirSync(this.cfg.briefsDir)) if (f.endsWith(".md")) rmSync(join(this.cfg.briefsDir, f), { force: true });
+    }
+    mkdirSync(this.cfg.briefsDir, { recursive: true });
+    this.store = new Store(this.cfg.stateDir);
+    this.statusCache = null;
+    this.lastPollAt = null;
+    this.lastPollError = null;
+    this.notes.clear();
+    this.queueExistingOnce = true;
+    log.info("erased all tickets and local data (sign-ins and settings kept)");
+    return { ok: true };
   }
 
   /** True before this tracker has ever produced a ticket (a fresh install, or a tracker never used). */
@@ -317,12 +353,13 @@ export class Autopilot {
       for (const ref of await this.tracker.assignedToMe()) {
         if (!this.eligible(ref.assigneeId, ref.stateName, ref.stateType, me)) continue;
         eligibleIds.add(ref.id);
-        this.store.markAssigned(ref.id, ref.identifier, !this.cfg.processExistingOnFirstRun);
+        this.store.markAssigned(ref.id, ref.identifier, !this.queueExisting());
       }
       for (const row of this.store.listByStatus(["pending"])) {
         if (!eligibleIds.has(row.linear_id)) this.dismissIfPending(row.linear_id, `not assigned to me in ${this.pickupLabel()}`);
       }
-      const verb = this.cfg.processExistingOnFirstRun ? "queued" : "baselined";
+      const verb = this.queueExisting() ? "queued" : "baselined";
+      this.queueExistingOnce = false;
       log.info(`first run: ${verb} ${eligibleIds.size} tickets already assigned to me in ${this.pickupLabel()}`);
       this.store.setMeta(CURSOR_KEY, startedAt);
       return;

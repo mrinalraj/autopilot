@@ -62,8 +62,9 @@ bun run login && bun run once
 bun run cli service install
 ```
 
-On the very first poll, tickets that are *already* eligible are only recorded, not proposed, so
-your backlog doesn't flood in. Run `bun run reset` if you do want them triaged.
+On the very first poll, the tickets already waiting in your pickup statuses are triaged straight
+away. If that's a big backlog, set `processExistingOnFirstRun` to `false` first: they're then only
+recorded, and only tickets that arrive later are proposed.
 
 ### Install as an app (PWA)
 
@@ -330,7 +331,7 @@ project directory, and `~` is expanded.
 | `stateDir` / `briefsDir` | `./state` / `./state/briefs` | `./state/jira` for Jira. |
 | `githubUser` | `""` | GitHub account used for PR tracking. Empty means `gh`'s active account. Set it if you keep several `gh` logins, so switching accounts doesn't break tracking. When the account changes (here, or gh's active one when this is empty), the next check re-reads every ticket's PRs, completed ones included. |
 | `linearUserId` | `""` | Empty = the logged-in Linear user. |
-| `processExistingOnFirstRun` | `false` | Triage already-eligible tickets on the very first poll. |
+| `processExistingOnFirstRun` | `true` | Triage already-eligible tickets on the very first poll; `false` only records them. |
 | `moveToInProgressOnApprove` | `false` | Moves the Linear issue to its team's started state after launch. Needs the write scope: run `bun run login --force` after enabling it. |
 | `lowConfidenceThreshold` | `0.6` | Below this, the card asks for a review before approving. |
 | `llm.provider` | `"cli"` | `"cli"` = `claude -p` with your Claude Code login. `"api"` = Anthropic SDK with `ANTHROPIC_API_KEY`. |

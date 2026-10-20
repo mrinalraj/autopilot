@@ -88,6 +88,7 @@ beforeAll(() => {
   // Importing existing work has its own test; keep it out of the pickup flow tested here.
   cfg.importStates = [];
   cfg.importWorktrees = false;
+  cfg.processExistingOnFirstRun = false; // the baseline option, tested here
   store = new Store(cfg.stateDir);
   linear.add("pre", ME); // already mine before first run
   ap = new Autopilot(cfg, store, linear as unknown as Tracker, llm);

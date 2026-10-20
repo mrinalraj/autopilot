@@ -127,3 +127,12 @@ export function saveTracker(form: FormData, path = CONFIG_PATH): { ok: true; tra
   writeFileSync(path, JSON.stringify(raw, null, 2) + "\n");
   return { ok: true, tracker };
 }
+
+/** Back to default settings, keeping what the sign-in and the address depend on. */
+export function resetSettingsFile(path = CONFIG_PATH) {
+  const raw: Record<string, any> = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+  const kept: Record<string, any> = {};
+  for (const k of ["tracker", "port", "oauthCallbackPort"]) if (k in raw) kept[k] = raw[k];
+  if (raw.jira?.site) kept.jira = { site: raw.jira.site };
+  writeFileSync(path, JSON.stringify(kept, null, 2) + "\n");
+}

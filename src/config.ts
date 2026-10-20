@@ -76,7 +76,7 @@ export interface Config {
   importStates: string[];
   /** Scan every repo's worktrees for ticket numbers in branch names and show those tickets too. */
   importWorktrees: boolean;
-  /** Prompt for tickets already eligible on the very first run (default: baseline them silently). */
+  /** Triage tickets already eligible on the very first run; off = only record them (for a big pickup backlog). */
   processExistingOnFirstRun: boolean;
   /** Move the Linear issue to its team's "started" state on approve (login must include the write scope). */
   moveToInProgressOnApprove: boolean;
@@ -126,7 +126,7 @@ const DEFAULTS: Config = {
   pickupStates: ["Ready for Development"],
   importStates: ["In Development"],
   importWorktrees: true,
-  processExistingOnFirstRun: false,
+  processExistingOnFirstRun: true,
   moveToInProgressOnApprove: false,
   lowConfidenceThreshold: 0.6,
   llm: {

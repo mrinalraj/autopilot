@@ -156,6 +156,7 @@ details.danger ul { margin:8px 0; }
 .actrow { display:flex; gap:12px; align-items:center; padding:8px 0; border-top:1px solid var(--border); }
 .actrow:first-of-type { border-top:0; }
 .actrow form { margin:0; flex:none; } .actrow form button { min-width:170px; justify-content:center; }
+.actrow.erase { align-items:flex-start; } .actrow.erase > button { min-width:170px; justify-content:center; flex:none; }
 .gear { font-size:18px; padding:6px 10px; }
 
 /* Live log panel */

@@ -13,7 +13,7 @@ import { Store } from "./db";
 import { atRisk, isSettled, overallStage, stage, type RepoWork, type WorkStage } from "./work";
 import type { Updater } from "./updater";
 import type { Health, SetupItem } from "./health";
-import { githubAccounts, saveSettings, saveTracker } from "./settings";
+import { githubAccounts, resetSettingsFile, saveSettings, saveTracker } from "./settings";
 import { openTracker } from "./connect";
 import { settingsBody } from "./settings-page";
 import { managedByLaunchd } from "./update";
@@ -504,6 +504,20 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
           } catch (err) {
             return redirect(`/settings?error=${encodeURIComponent(`Reset failed: ${(err as Error).message}`)}`);
           }
+        }
+        if (path === "/actions/erase") {
+          if (form.get("confirm") !== "on") return redirect(`/settings?error=${encodeURIComponent('Tick "Yes, erase everything" to confirm.')}`);
+          const resetSettings = form.get("resetSettings") === "on";
+          const res = await ap.eraseAll(resetSettings ? () => {
+            resetSettingsFile();
+            Object.assign(ap.cfg, loadConfig());
+          } : undefined);
+          if (!res.ok) return redirect(`/settings?error=${encodeURIComponent(`Not erased: ${res.error}`)}`);
+          ap.store.restoreBanners();
+          reschedule?.();
+          void health?.refresh();
+          void ap.poll();
+          return redirect(`/?notice=${encodeURIComponent(`Erased all data${resetSettings ? " and reset settings" : ""}; still signed in. Checking ${ap.trackerLabel} for your tickets now.`)}`);
         }
         if (path === "/actions/signin") {
           const res = ap.startSignIn();

@@ -9,7 +9,7 @@
   "pickupStates": [
     "Ready for Development"
   ],
-  "processExistingOnFirstRun": false,
+  "processExistingOnFirstRun": true,
   "moveToInProgressOnApprove": false,
   "lowConfidenceThreshold": 0.6,
   "llm": {

@@ -167,6 +167,12 @@ export function settingsBody(d: SettingsData): string {
     <section class="box" style="margin-top:20px"><h3>Maintenance</h3>
       <div class="actrow">${action("/poll", "↻ Poll now", "Checking…")}<span class="muted small">Check ${t} and refresh PR status now.</span></div>
       <div class="actrow">${action("/actions/reset", "Reset tickets", "Resetting…", "ghost-danger")}<span class="muted small">Clear tickets that haven't been launched and triage everything currently eligible again. Launched tickets are kept.</span></div>
+      <form method="post" action="/actions/erase" class="actrow erase">${tokenField}
+        <button class="ghost-danger" data-busy-label="Erasing…">Erase all data</button>
+        <span class="muted small">Every ticket (launched and imported too), brief and dismissed tip, for Linear and Jira. Sign-ins stay; worktrees and branches aren't touched. Afterwards your current tickets are fetched and triaged again.
+          <label class="check" style="margin:6px 0 0"><input type="checkbox" name="resetSettings"> Also reset settings to defaults</label>
+          <label class="check" style="margin:4px 0 0"><input type="checkbox" name="confirm" required> Yes, erase everything</label></span>
+      </form>
       <div class="actrow">${action("/actions/recheck", "Re-run setup checks", "Checking…")}<span class="muted small">Refresh the setup tips on the home screen.</span></div>
       <div class="actrow">${action("/banners/restore", `Show dismissed tips${d.dismissedTips ? ` (${d.dismissedTips})` : ""}`, "Showing…")}<span class="muted small">Bring back setup tips you dismissed.</span></div>
       <div class="actrow">${action("/actions/check-updates", "Check for updates", "Checking…")}<span class="muted small">Version ${esc(d.version)}.</span></div>
