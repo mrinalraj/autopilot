@@ -74,16 +74,27 @@ Never derive paths from `import.meta.dir` elsewhere: inside the binary it's Bun'
 - **Never pass Supacode's `--fetch`.** Supacode runs `/usr/bin/git`, whose credential helper isn't
   trusted for the github.com Keychain item, so the user gets a Keychain prompt on every launch. The
   daemon fetches with its own `git` instead (`fetchOrigin` in `launch.ts`).
-- **Never call `git worktree add`.** Worktrees are created by Supacode (`repo worktree-new`), so its
-  branch creation and hooks run. Read-only git (`worktree list`, `rev-list`, `status`) is fine.
-- **`Bun.spawn` doesn't pick up later `process.env` changes.** Pass `env: process.env` explicitly
-  when spawning.
+- **Supacode and Worktrunk own their worktrees,** so their hooks run. Only the git, VS Code and
+  Cursor launchers call `git worktree add` themselves. Read-only git (`worktree list`, `rev-list`,
+  `status`) is fine anywhere.
+- **Imported tickets** (`importExisting`) are `running` rows with `markAssigned(…, handled = true)`
+  so they're never triaged. Some have no worktree (`worktree_id` null, `repo` ""); UI and work
+  tracking must cope with that.
+- **Phases** (`phaseOf`) come from the live Linear status (`linear_state*`, refreshed with the work
+  check) plus PR state. The DB status stays `running`.
+- **Settings** write `config.json` through `saveSettings`, which keeps unknown keys and applies the
+  change in place (`Object.assign(cfg, loadConfig())`). The daemon's timers read the live config
+  through `reschedule()`.
+- **Bun reads the environment once at startup.** `Bun.spawn` and `Bun.which` ignore later changes to
+  `process.env` (such as `preparePath()` under launchd), so pass `env: process.env` and
+  `{ PATH: process.env.PATH }` explicitly.
 - **Secrets:** never write tokens or keys to files, logs, briefs or SQLite. Use `keychain.ts`, which
   passes values to `security` over stdin as hex.
 - **Page refreshes:** anything that changes a row bumps `updated_at`, which reloads open pages. For
   periodic data (work checks), only bump on a material change (`setWork(…, bump)`).
-- **Deleting worktrees** goes through Supacode (`removeWorktree`). Never `rm -rf` or
-  `git worktree remove` it ourselves. Always re-check with `checkWork` and refuse on `atRisk`
+- **Worktrees are created and removed by the ticket's launcher** (`launcherFor(cfg, row.launcher)`
+  in `launch.ts`). Never `rm -rf` a worktree. Supacode-made ones must go through Supacode, and
+  `git worktree add`/`remove` is only for the git, VS Code and Cursor launchers. Always re-check with `checkWork` and refuse on `atRisk`
   unless forced. Unknown state counts as at risk.
 - **Updates:** release asset names come from `scripts/build.sh` and `assetName()` in `update.ts`;
   keep them in sync. Installs verify the SHA-256 and the new binary's reported version before

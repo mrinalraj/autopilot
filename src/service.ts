@@ -5,6 +5,8 @@ import { COMPILED, HOME_DIR, LOG_PATH } from "./config";
 
 /** LaunchAgent that runs `linear-autopilot start` at login and restarts it if it exits. */
 export const LABEL = "dev.linear-autopilot";
+/** Labels `brew services` uses (newer Homebrew: sh.brew.*, older: homebrew.mxcl.*). */
+const BREW_LABELS = ["sh.brew.linear-autopilot", "homebrew.mxcl.linear-autopilot"];
 
 const plistPath = (label: string) => join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
 const domain = () => `gui/${process.getuid!()}`;
@@ -24,6 +26,9 @@ function launchctl(...args: string[]) {
 }
 
 export function installService() {
+  if (COMPILED && process.execPath.includes("/Cellar/")) {
+    throw new Error("installed with Homebrew: use `brew services start linear-autopilot` instead");
+  }
   mkdirSync(dirname(LOG_PATH), { recursive: true });
   const args = programArguments().map((a) => `<string>${xml(a)}</string>`).join("");
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -56,15 +61,21 @@ export function uninstallService() {
   console.log(`Removed ${LABEL}.`);
 }
 
+/** The label of whichever service is loaded: ours or Homebrew's. */
+function loadedLabel(): string | null {
+  return [LABEL, ...BREW_LABELS].find((l) => launchctl("print", `${domain()}/${l}`).code === 0) ?? null;
+}
+
 export function restartService() {
-  const r = launchctl("kickstart", "-k", `${domain()}/${LABEL}`);
+  const r = launchctl("kickstart", "-k", `${domain()}/${loadedLabel() ?? LABEL}`);
   if (r.code !== 0) throw new Error(`not installed or not loaded (${r.out}); run: linear-autopilot service install`);
   console.log("Restarted.");
 }
 
 export function serviceStatus(): string {
-  const r = launchctl("print", `${domain()}/${LABEL}`);
-  if (r.code !== 0) return `${LABEL}: not installed`;
+  const label = loadedLabel();
+  if (!label) return "not running as a service";
+  const r = launchctl("print", `${domain()}/${label}`);
   const field = (k: string) => r.out.match(new RegExp(`^\\s*${k} = (.*)$`, "m"))?.[1] ?? "?";
-  return `${LABEL}: ${field("state")}, pid ${field("pid")}, last exit ${field("last exit code")}`;
+  return `${label}: ${field("state")}, pid ${field("pid")}, last exit ${field("last exit code")}`;
 }

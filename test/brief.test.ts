@@ -8,7 +8,7 @@ const row = (description: string): IssueRow => ({
   resolve_reason: "r", status: "pending", error: null, worktree_id: null,
   ticket_json: JSON.stringify({ description, comments: [{ author: "A", createdAt: "2026-01-01", body: "c ```` x" }],
     team: "ENG (Eng)", project: null, labels: [], attachments: [], state: "Todo" }),
-  explainer_json: JSON.stringify({ summary: "S", approach: "A", likely_areas: ["x/y.go"], size: "S" }), work_json: null, extra_repos_json: "[]",
+  explainer_json: JSON.stringify({ summary: "S", approach: "A", likely_areas: ["x/y.go"], size: "S" }), work_json: null, extra_repos_json: "[]", launcher: null, linear_state: null, linear_state_type: null,
   created_at: "", updated_at: "",
 });
 

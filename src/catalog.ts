@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { Config } from "./config";
 
 export interface RepoEntry {
@@ -52,15 +52,47 @@ function discover(reposRoot: string): string[] {
  * Repo catalog for every git repo directly under `reposRoot`. Derived descriptions are
  * cached in the state dir on first sight; `config.repos[name].description` always wins.
  */
+/** Every git repo under reposRoot, excluded ones included, with derived and overridden descriptions. */
+/** The repos in play: discovered in the parent folder, or the explicit list (named by folder). */
+export function repoSources(cfg: Config): { name: string; path: string }[] {
+  if (cfg.repoMode === "list") {
+    const seen = new Map<string, number>();
+    return cfg.repoPaths
+      .filter((p) => existsSync(join(p, ".git")))
+      .map((path) => {
+        const base = basename(path);
+        const n = (seen.get(base) ?? 0) + 1;
+        seen.set(base, n);
+        // Two repos with the same folder name get the parent's name prepended to stay distinct.
+        return { name: n === 1 ? base : `${basename(dirname(path))}-${base}`, path };
+      });
+  }
+  if (!existsSync(cfg.reposRoot)) return [];
+  return discover(cfg.reposRoot).map((name) => ({ name, path: join(cfg.reposRoot, name) }));
+}
+
+export function listRepos(cfg: Config): { name: string; path: string; derived: string; override: string; excluded: boolean }[] {
+  const cachePath = join(cfg.stateDir, "catalog.cache.json");
+  const cache: Record<string, string> = existsSync(cachePath) ? JSON.parse(readFileSync(cachePath, "utf8")) : {};
+  return repoSources(cfg).map(({ name, path }) => {
+    return {
+      name,
+      path,
+      derived: cache[name] ?? deriveDescription(path),
+      override: cfg.repos[name]?.description ?? "",
+      excluded: !!cfg.repos[name]?.exclude,
+    };
+  });
+}
+
 export function loadCatalog(cfg: Config): RepoEntry[] {
   const cachePath = join(cfg.stateDir, "catalog.cache.json");
   const cache: Record<string, string> = existsSync(cachePath) ? JSON.parse(readFileSync(cachePath, "utf8")) : {};
   let dirty = false;
 
-  const entries = discover(cfg.reposRoot)
-    .filter((name) => !cfg.repos[name]?.exclude)
-    .map((name) => {
-      const path = join(cfg.reposRoot, name);
+  const entries = repoSources(cfg)
+    .filter(({ name }) => !cfg.repos[name]?.exclude)
+    .map(({ name, path }) => {
       if (!(name in cache)) {
         cache[name] = deriveDescription(path);
         dirty = true;

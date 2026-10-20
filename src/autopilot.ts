@@ -6,14 +6,29 @@ import { loadCatalog, type RepoEntry } from "./catalog";
 import { explain, resolveRepo, type Explainer } from "./triage";
 import { briefPath, initPrompt, removeBrief, snapshot, writeBrief, type TicketSnapshot } from "./brief";
 import { isValidBranch, normalizeBranch } from "./branch";
-import { ensureWorktree, openClaudeTab, removeWorktree } from "./launch";
+import { launcherFor, supacodeId, supacodeWorktreePaths } from "./launch";
+import { scanWorktrees, type FoundWorktree } from "./importer";
 import { notify } from "./notify";
-import { atRisk, checkWork, isSettled, workFingerprint, type RepoWork } from "./work";
+import { atRisk, checkWork, isSettled, overallStage, workFingerprint, type RepoWork } from "./work";
 import { log } from "./log";
 
 export const CURSOR_KEY = "poll_cursor";
 /** Re-read a window before the cursor to absorb clock skew between us and Linear. */
 const CURSOR_OVERLAP_MS = 5 * 60_000;
+
+export type Phase = "in-progress" | "in-review" | "completed";
+
+/**
+ * Where a launched or imported ticket stands: completed when Linear says done/canceled or every
+ * touched repo's PR is merged/closed; in review when Linear's status says review or a PR is open.
+ */
+export function phaseOf(row: IssueRow, work: RepoWork[] | null): Phase {
+  if (["completed", "canceled", "duplicate"].includes(row.linear_state_type ?? "")) return "completed";
+  if (isSettled(work)) return "completed";
+  if (/review/i.test(row.linear_state ?? "")) return "in-review";
+  if (work && overallStage(work) === "pr-open") return "in-review";
+  return "in-progress";
+}
 
 /** Assigned to me, open, and in one of the configured pickup states. */
 export function isEligible(cfg: Config, assigneeId: string | null, stateName: string, stateType: string, me: string): boolean {
@@ -66,6 +81,13 @@ export class Autopilot {
 
   private checkingWork = false;
 
+  /** What the daemon is doing right now, for the page's activity banner (triage has its own). */
+  activity(): string | null {
+    if (this.polling) return "Checking Linear for new tickets…";
+    if (this.checkingWork) return "Refreshing commits and PR status…";
+    return null;
+  }
+
   /** Re-reads commits and PR state for every unsettled launched item, or just `only` (settled or not). */
   async refreshWork(only?: string): Promise<void> {
     if (this.checkingWork && !only) return;
@@ -73,7 +95,10 @@ export class Autopilot {
     try {
       const rows = only ? [this.store.getIssue(only)].filter((r): r is IssueRow => !!r) : this.store.listByStatus(["running"], 200);
       for (const row of rows) {
-        if (!row.worktree_id) continue;
+        if (!row.worktree_id) {
+          await this.refreshLinearState(row); // imported without a worktree: Linear status only
+          continue;
+        }
         const prev = Autopilot.work(row);
         if (isSettled(prev) && !only) continue;
         try {
@@ -82,7 +107,8 @@ export class Autopilot {
             ...Store.extras(row).flatMap((e) => (e.worktree_id ? [{ repo: e.repo, repoPath: e.repo_path, worktreeId: e.worktree_id }] : [])),
           ];
           const work: RepoWork[] = [];
-          for (const r of repos) work.push({ repo: r.repo, ...(await checkWork(r.worktreeId, r.repoPath, row.branch)) });
+          for (const r of repos) work.push({ repo: r.repo, ...(await checkWork(r.worktreeId, r.repoPath, row.branch, this.cfg.githubUser)) });
+          await this.refreshLinearState(row);
           const changed = !prev || workFingerprint(prev) !== workFingerprint(work);
           this.store.setWork(row.linear_id, JSON.stringify(work), changed);
           for (const w of work) {
@@ -99,6 +125,98 @@ export class Autopilot {
   }
 
   /** Per-repo work, primary first. Rows checked before multi-repo support stored a single object. */
+  private statusCache: { at: number; options: { team: string; name: string; type: string }[] } | null = null;
+
+  /** My Linear teams' keys (the default ticket prefixes); empty if Linear is unreachable. */
+  async teamKeys(): Promise<string[]> {
+    try {
+      return (await this.linear.me()).teams.map((t) => t.key);
+    } catch {
+      return [];
+    }
+  }
+
+  /** My teams' workflow statuses for the settings pickers (cached 10 minutes; empty if Linear is unreachable). */
+  async statusOptions(): Promise<{ team: string; name: string; type: string }[]> {
+    if (!this.statusCache || Date.now() - this.statusCache.at > 600_000) {
+      try {
+        this.statusCache = { at: Date.now(), options: await this.linear.teamStatuses() };
+      } catch (err) {
+        log.warn("could not load Linear statuses", err);
+        return this.statusCache?.options ?? [];
+      }
+    }
+    return this.statusCache.options;
+  }
+
+  /** Keeps a tracked ticket's Linear status current (it drives the In review / Completed grouping). */
+  private async refreshLinearState(row: IssueRow) {
+    try {
+      const s = await this.linear.issueState(row.linear_id);
+      if (s && (s.name !== row.linear_state || s.type !== row.linear_state_type)) {
+        this.store.updateIssue(row.linear_id, { linear_state: s.name, linear_state_type: s.type });
+      }
+    } catch (err) {
+      log.warn(`could not refresh Linear status for ${row.identifier}`, err);
+    }
+  }
+
+  /**
+   * Brings in work that didn't start here: my tickets in `importStates` (e.g. In Development) and
+   * any worktree whose branch names a ticket. Imported tickets skip triage (no LLM call) and are
+   * tracked like launched ones. Tickets that already have a row are left alone.
+   */
+  async importExisting(): Promise<string[]> {
+    const me = await this.linear.me();
+    const prefixes = this.cfg.ticketPrefixes.length ? this.cfg.ticketPrefixes : me.teams.map((t) => t.key);
+    const found = this.cfg.importWorktrees ? await scanWorktrees(this.catalog(), prefixes) : new Map<string, FoundWorktree[]>();
+    const wanted = new Set(found.keys());
+    if (this.cfg.importStates.length) for (const r of await this.linear.mineInStates(this.cfg.importStates)) wanted.add(r.identifier);
+
+    const supacodePaths = await supacodeWorktreePaths(this.cfg);
+    const imported: string[] = [];
+    for (const identifier of wanted) {
+      if (this.store.getIssueByIdentifier(identifier)) continue;
+      const issue = await this.linear.issue(identifier);
+      if (!issue || this.store.getIssue(issue.id)) continue;
+      const wts = found.get(identifier) ?? [];
+      const [primary, ...others] = wts;
+      const snapshotJson = JSON.stringify(snapshot(issue));
+      const summary = (issue.description ?? "").replace(/\s+/g, " ").trim().slice(0, 280);
+      this.store.upsertIssue({
+        linear_id: issue.id,
+        identifier: issue.identifier,
+        title: issue.title,
+        url: issue.url,
+        brief_path: briefPath(this.cfg.briefsDir, issue.identifier),
+        repo: primary?.repo ?? "",
+        repo_path: primary?.repoPath ?? "",
+        branch: primary?.branch ?? issue.gitBranchName ?? issue.identifier.toLowerCase(),
+        confidence: 1,
+        resolve_reason: wts.length ? `Imported from existing worktree${wts.length > 1 ? "s" : ""}` : `Imported from Linear (${issue.state.name}); no worktree found`,
+        status: "running",
+        error: null,
+        worktree_id: primary ? supacodeId(primary.path) : null,
+        ticket_json: snapshotJson,
+        explainer_json: JSON.stringify({ summary: summary || "Imported ticket.", approach: "", likely_areas: [], size: "" }),
+        extra_repos_json: JSON.stringify(
+          others.map((w): ExtraRepo => ({ repo: w.repo, repo_path: w.repoPath, reason: "", worktree_id: supacodeId(w.path) })),
+        ),
+      });
+      this.store.updateIssue(issue.id, {
+        launcher: primary && supacodePaths.has(primary.path) ? "supacode" : "git",
+        linear_state: issue.state.name,
+        linear_state_type: issue.state.type,
+      });
+      this.store.markAssigned(issue.id, issue.identifier, true); // never triage an imported ticket
+      writeBrief(this.store.getIssue(issue.id)!);
+      imported.push(issue.identifier);
+      await this.refreshWork(issue.id);
+    }
+    if (imported.length) log.info(`imported ${imported.length} existing ticket${imported.length === 1 ? "" : "s"}: ${imported.join(", ")}`);
+    return imported;
+  }
+
   static work(row: IssueRow): RepoWork[] | null {
     if (!row.work_json) return null;
     const w = JSON.parse(row.work_json);
@@ -112,6 +230,7 @@ export class Autopilot {
     try {
       await this.detectAssignments();
       await this.processQueue();
+      await this.importExisting().catch((err) => log.warn("import of existing work failed", err));
       this.lastPollError = null;
     } catch (err) {
       const msg = (err as Error).message;
@@ -283,19 +402,25 @@ export class Autopilot {
    */
   private async runLaunch(row: IssueRow) {
     try {
+      // A retry keeps the launcher that already made some of the worktrees.
+      const launcher = launcherFor(this.cfg, row.launcher);
+      this.store.updateIssue(row.linear_id, { launcher: launcher.name });
       const extras = Store.extras(row);
+      const others: { repo: string; path: string }[] = [];
       for (const e of extras) {
-        e.worktree_id = await ensureWorktree(this.cfg, e.repo_path, row.branch, true);
+        const path = await launcher.ensureWorktree(e.repo_path, row.branch, true);
+        e.worktree_id = supacodeId(path);
+        others.push({ repo: e.repo, path });
         this.store.updateIssue(row.linear_id, { extra_repos_json: JSON.stringify(extras) });
       }
-      const worktreeId = await ensureWorktree(this.cfg, row.repo_path, row.branch, this.cfg.launch.background);
-      this.store.updateIssue(row.linear_id, { worktree_id: worktreeId });
+      const primaryPath = await launcher.ensureWorktree(row.repo_path, row.branch, this.cfg.launch.background);
+      this.store.updateIssue(row.linear_id, { worktree_id: supacodeId(primaryPath) });
       writeBrief(this.store.getIssue(row.linear_id)!);
 
-      const others = extras.map((e) => ({ repo: e.repo, path: decodeURIComponent(e.worktree_id!).replace(/\/$/, "") }));
-      await openClaudeTab(this.cfg, {
+      await launcher.openSession({
         identifier: row.identifier,
-        worktreeId,
+        primaryPath,
+        otherPaths: others.map((o) => o.path),
         prompt: initPrompt(row.brief_path, others),
         addDirs: [this.cfg.briefsDir, ...others.map((o) => o.path)],
         background: this.cfg.launch.background,
@@ -334,16 +459,17 @@ export class Autopilot {
     const wts = Autopilot.worktrees(row);
     if (!wts.length) return { ok: false, error: "no worktrees to delete" };
 
-    const checks = await Promise.all(wts.map(async (w) => ({ ...w, work: await checkWork(w.worktreeId, w.repoPath, row.branch) })));
+    const checks = await Promise.all(wts.map(async (w) => ({ ...w, work: await checkWork(w.worktreeId, w.repoPath, row.branch, this.cfg.githubUser) })));
     const live = checks.filter((c) => !c.work.missing);
     if (!live.length) return { ok: false, error: "the worktrees are already gone" };
     const risks = live.flatMap((c) => atRisk(c.work).map((r) => `${c.repo}: ${r}`));
     if (risks.length && !force) return { ok: false, error: `not deleted, it would lose ${risks.join(", ")}; tick "delete anyway" to confirm` };
 
     const failed: string[] = [];
+    const launcher = launcherFor(this.cfg, row.launcher ?? "supacode");
     for (const c of live) {
       try {
-        await removeWorktree(this.cfg, c.worktreeId);
+        await launcher.removeWorktree(c.repoPath, c.work.worktreePath, row.branch, force);
         log.info(`${row.identifier}: deleted worktree ${c.work.worktreePath}`);
       } catch (err) {
         failed.push(`${c.repo}: ${(err as Error).message}`);

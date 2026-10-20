@@ -4,6 +4,7 @@
   "port": 4747,
   "oauthCallbackPort": 4748,
   "reposRoot": "~/code",
+  "githubUser": "",
   "linearUserId": "",
   "pickupStates": [
     "Ready for Development"

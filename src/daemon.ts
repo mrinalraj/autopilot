@@ -8,6 +8,7 @@ import { startWeb } from "./web";
 import { prepareSecrets } from "./env";
 import { log } from "./log";
 import { Updater } from "./updater";
+import { Health } from "./health";
 
 /** Runs the poller, work tracker and web page; with `once`, a single poll and exit. */
 export async function runDaemon(opts: { once?: boolean } = {}) {
@@ -26,9 +27,22 @@ export async function runDaemon(opts: { once?: boolean } = {}) {
     process.exit(ap.lastPollError ? 1 : 0);
   }
 
+  // Timers read the live config, so Settings changes to the intervals apply without a restart.
+  let timers: ReturnType<typeof setInterval>[] = [];
+  function reschedule() {
+    timers.forEach(clearInterval);
+    timers = [
+      setInterval(() => void ap.poll(), cfg.pollIntervalSeconds * 1000),
+      setInterval(() => void ap.refreshWork(), cfg.workCheckIntervalSeconds * 1000),
+    ];
+  }
+
   const updater = new Updater();
+  const health = new Health(cfg);
+  await health.refresh().catch((err) => log.warn("setup check failed", err));
+  setInterval(() => void health.refresh().catch(() => {}), 10 * 60_000);
   try {
-    startWeb(ap, updater);
+    startWeb(ap, { updater, health, reschedule });
   } catch (err) {
     if ((err as { code?: string }).code === "EADDRINUSE") {
       log.error(`port ${cfg.port} is already in use; is another linear-autopilot running? (try: linear-autopilot service status)`);
@@ -37,10 +51,9 @@ export async function runDaemon(opts: { once?: boolean } = {}) {
     throw err;
   }
   log.info(`polling Linear every ${cfg.pollIntervalSeconds}s; repos under ${cfg.reposRoot}; llm ${cfg.llm.provider}/${cfg.llm.model}`);
+  reschedule();
   await ap.poll();
-  setInterval(() => void ap.poll(), cfg.pollIntervalSeconds * 1000);
   void ap.refreshWork();
-  setInterval(() => void ap.refreshWork(), cfg.workCheckIntervalSeconds * 1000);
   updater.start();
 
   for (const sig of ["SIGINT", "SIGTERM"] as const) {

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-function expandHome(p: string): string {
+export function expandHome(p: string): string {
   return p === "~" ? homedir() : p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
 }
 
@@ -20,7 +20,12 @@ export const HOME_DIR = process.env.AUTOPILOT_HOME
     : resolve(import.meta.dir, "..");
 
 export const CONFIG_PATH = process.env.AUTOPILOT_CONFIG ?? join(HOME_DIR, "config.json");
-export const LOG_PATH = join(HOME_DIR, "logs", "autopilot.log");
+/** Homebrew prefix when running from a Homebrew install (its `brew services` logs to var/log). */
+const BREW_PREFIX = COMPILED ? process.execPath.match(/^(.*)\/Cellar\//)?.[1] ?? null : null;
+export const LOG_PATH = BREW_PREFIX ? join(BREW_PREFIX, "var", "log", "linear-autopilot.log") : join(HOME_DIR, "logs", "autopilot.log");
+
+export const LAUNCHERS = ["supacode", "worktrunk", "git", "vscode", "cursor"] as const;
+export type LauncherName = (typeof LAUNCHERS)[number];
 
 export interface Config {
   pollIntervalSeconds: number;
@@ -29,10 +34,17 @@ export interface Config {
   port: number;
   /** Loopback port for the one-time OAuth redirect during `bun run login`. */
   oauthCallbackPort: number;
+  /** "folder": every git repo directly inside reposRoot. "list": exactly the repos in repoPaths. */
+  repoMode: "folder" | "list";
   reposRoot: string;
+  repoPaths: string[];
+  /** Ticket prefixes (ENG, IT, …) recognised in branch and worktree names. Empty = my Linear teams' keys. */
+  ticketPrefixes: string[];
   stateDir: string;
   /** Read-only ticket briefs rendered from the DB for the Claude session. Default: <stateDir>/briefs */
   briefsDir: string;
+  /** GitHub account (`gh auth login`) used for PR tracking. Empty = gh's active account. */
+  githubUser: string;
   /** Linear user ID to treat as "me". Empty = use the API key's viewer. */
   linearUserId: string;
   /**
@@ -40,6 +52,10 @@ export interface Config {
    * A ticket is proposed when it enters "assigned to me + one of these states". Empty = any open state.
    */
   pickupStates: string[];
+  /** My tickets in these Linear statuses are shown under In progress, mapped to their worktrees. */
+  importStates: string[];
+  /** Scan every repo's worktrees for ticket numbers in branch names and show those tickets too. */
+  importWorktrees: boolean;
   /** Prompt for tickets already eligible on the very first run (default: baseline them silently). */
   processExistingOnFirstRun: boolean;
   /** Move the Linear issue to its team's "started" state on approve (login must include the write scope). */
@@ -52,6 +68,12 @@ export interface Config {
     claudeBin: string;
   };
   launch: {
+    /** Who creates worktrees and hosts the Claude session. */
+    launcher: LauncherName;
+    /** Where Claude opens for launchers without their own (worktrunk, git, vscode, cursor); "none" only creates worktrees. */
+    terminal: "terminal" | "iterm" | "warp" | "none";
+    /** Where the git, vscode and cursor launchers put worktrees. Default: <reposRoot>/wt */
+    worktreesDir: string;
     supacodeBin: string;
     claudeBin: string;
     fetch: boolean;
@@ -67,11 +89,17 @@ const DEFAULTS: Config = {
   workCheckIntervalSeconds: 300,
   port: 4747,
   oauthCallbackPort: 4748,
+  repoMode: "folder",
   reposRoot: join(homedir(), "code"),
+  repoPaths: [],
+  ticketPrefixes: [],
   stateDir: join(HOME_DIR, "state"),
   briefsDir: "",
+  githubUser: "",
   linearUserId: "",
   pickupStates: ["Ready for Development"],
+  importStates: ["In Development"],
+  importWorktrees: true,
   processExistingOnFirstRun: false,
   moveToInProgressOnApprove: false,
   lowConfidenceThreshold: 0.6,
@@ -81,6 +109,9 @@ const DEFAULTS: Config = {
     claudeBin: "claude",
   },
   launch: {
+    launcher: "supacode",
+    terminal: "terminal",
+    worktreesDir: "",
     supacodeBin: "/Applications/supacode.app/Contents/Resources/bin/supacode",
     claudeBin: "claude",
     fetch: true,
@@ -100,8 +131,15 @@ export function loadConfig(path = CONFIG_PATH): Config {
     repos: { ...DEFAULTS.repos, ...user.repos },
   };
   cfg.reposRoot = expandHome(cfg.reposRoot);
+  cfg.repoPaths = (cfg.repoPaths ?? []).map(expandHome);
+  if (cfg.repoMode !== "list") cfg.repoMode = "folder";
+  cfg.ticketPrefixes = (cfg.ticketPrefixes ?? []).map((p) => p.trim().toUpperCase()).filter(Boolean);
   cfg.stateDir = expandHome(cfg.stateDir);
   cfg.briefsDir = cfg.briefsDir ? expandHome(cfg.briefsDir) : join(cfg.stateDir, "briefs");
+  cfg.launch.worktreesDir = cfg.launch.worktreesDir
+    ? expandHome(cfg.launch.worktreesDir)
+    : cfg.repoMode === "list" ? join(homedir(), "worktrees") : join(cfg.reposRoot, "wt");
+  if (!LAUNCHERS.includes(cfg.launch.launcher)) cfg.launch.launcher = "supacode";
   return cfg;
 }
 

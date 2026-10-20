@@ -30,6 +30,11 @@ export interface IssueRow {
   /** Ticket snapshot (verbatim fields from Linear) and explainer, as JSON. */
   ticket_json: string;
   explainer_json: string;
+  /** Live Linear workflow status (name and type) for launched and imported tickets. */
+  linear_state: string | null;
+  linear_state_type: string | null;
+  /** Launcher that created the worktrees (so cleanup uses the same tool). */
+  launcher: string | null;
   /** ExtraRepo[] as JSON; the primary repo is `repo`. */
   extra_repos_json: string;
   /** Latest RepoWork[] for a launched item, as JSON. */
@@ -94,6 +99,8 @@ export class Store {
     `);
     const columns = this.db.query<{ name: string }, []>("PRAGMA table_info(issues)").all().map((c) => c.name);
     if (!columns.includes("work_json")) this.db.exec("ALTER TABLE issues ADD COLUMN work_json TEXT");
+    if (!columns.includes("launcher")) this.db.exec("ALTER TABLE issues ADD COLUMN launcher TEXT");
+    if (!columns.includes("linear_state")) this.db.exec("ALTER TABLE issues ADD COLUMN linear_state TEXT; ALTER TABLE issues ADD COLUMN linear_state_type TEXT");
     if (!columns.includes("extra_repos_json")) this.db.exec("ALTER TABLE issues ADD COLUMN extra_repos_json TEXT NOT NULL DEFAULT '[]'");
     // v2 tracks eligibility instead of plain assignment: re-baseline from scratch.
     if (this.getMeta("tracking_version") !== "2") {
@@ -109,6 +116,21 @@ export class Store {
 
   setMeta(key: string, value: string) {
     this.db.query("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
+  }
+
+  /** Setup banners the user dismissed; remembered across browsers and restarts. */
+  dismissedBanners(): Set<string> {
+    return new Set(JSON.parse(this.getMeta("dismissed_banners") ?? "[]") as string[]);
+  }
+
+  dismissBanner(id: string) {
+    const ids = this.dismissedBanners();
+    ids.add(id);
+    this.setMeta("dismissed_banners", JSON.stringify([...ids]));
+  }
+
+  restoreBanners() {
+    this.setMeta("dismissed_banners", "[]");
   }
 
   getAssignment(linearId: string): AssignmentRow | null {
@@ -163,7 +185,7 @@ export class Store {
     return this.db.query<IssueRow, [string]>("SELECT * FROM issues WHERE identifier = ?").get(identifier);
   }
 
-  upsertIssue(row: Omit<IssueRow, "created_at" | "updated_at" | "work_json">) {
+  upsertIssue(row: Omit<IssueRow, "created_at" | "updated_at" | "work_json" | "launcher" | "linear_state" | "linear_state_type">) {
     const t = now();
     this.db
       .query(
@@ -180,7 +202,9 @@ export class Store {
 
   updateIssue(
     linearId: string,
-    fields: Partial<Pick<IssueRow, "repo" | "repo_path" | "branch" | "status" | "error" | "worktree_id" | "extra_repos_json">>,
+    fields: Partial<
+      Pick<IssueRow, "repo" | "repo_path" | "branch" | "status" | "error" | "worktree_id" | "extra_repos_json" | "launcher" | "linear_state" | "linear_state_type">
+    >,
   ) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (keys.length === 0) return;

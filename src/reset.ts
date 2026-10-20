@@ -9,13 +9,18 @@ import { CURSOR_KEY, isEligible } from "./autopilot";
  * brief, then queues the tickets eligible right now so the next poll (or "Poll now") triages them
  * afresh. Launched tickets keep their row, brief and PR tracking. Safe while the daemon runs.
  */
-export async function reset() {
+export interface ResetSummary {
+  cleared: string[];
+  kept: string[];
+  queued: string[];
+}
+
+export async function resetTickets(): Promise<ResetSummary> {
   const cfg = loadConfig();
   const store = new Store(cfg.stateDir);
   const linear = new LinearClient(new KeychainOAuthProvider(oauthRedirectUrl(cfg), oauthScope(cfg), () => {
     throw new LoginRequiredError();
   }));
-
   try {
     const me = cfg.linearUserId || (await linear.viewer()).id;
     const eligible = (await linear.assignedToMe()).filter((r) => isEligible(cfg, r.assigneeId, r.stateName, r.stateType, me));
@@ -33,14 +38,21 @@ export async function reset() {
       store.setMeta(CURSOR_KEY, new Date().toISOString());
     })();
     for (const r of cleared) rmSync(r.brief_path, { force: true });
+    return { cleared: cleared.map((r) => r.identifier), kept: kept.map((r) => r.identifier), queued: queued.map((r) => r.identifier) };
+  } finally {
+    await linear.close();
+  }
+}
 
-    console.log(`Cleared ${cleared.length} unlaunched tickets; kept ${kept.length} launched: ${kept.map((r) => r.identifier).join(", ") || "(none)"}`);
-    console.log(`Queued ${queued.length} for triage: ${queued.map((r) => r.identifier).join(", ") || "(none)"}`);
+/** CLI: reset and print what happened. */
+export async function reset() {
+  try {
+    const r = await resetTickets();
+    console.log(`Cleared ${r.cleared.length} unlaunched tickets; kept ${r.kept.length} launched: ${r.kept.join(", ") || "(none)"}`);
+    console.log(`Queued ${r.queued.length} for triage: ${r.queued.join(", ") || "(none)"}`);
     console.log('They are triaged on the next poll; click "Poll now" to start right away.');
   } catch (err) {
     console.error(`Reset failed: ${(err as Error).message}`);
     process.exitCode = 1;
-  } finally {
-    await linear.close();
   }
 }

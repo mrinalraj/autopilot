@@ -22,6 +22,8 @@ export interface LinearIssue {
   description: string | null;
   url: string;
   updatedAt: string;
+  /** Linear's suggested branch name for the issue. */
+  gitBranchName: string | null;
   assigneeId: string | null;
   state: { name: string; type: string };
   team: { id: string; key: string; name: string };
@@ -216,7 +218,7 @@ export class LinearClient {
       i = await this.call("get_issue", {
         id,
         fields: ["id", "uuid", "title", "description", "url", "updatedAt", "status", "statusType", "labels",
-          "assigneeId", "team", "teamId", "project", "attachments"],
+          "assigneeId", "team", "teamId", "project", "attachments", "gitBranchName"],
       });
     } catch (err) {
       if (/not found/i.test((err as Error).message)) return null;
@@ -240,6 +242,7 @@ export class LinearClient {
       description: i.description || null,
       url: i.url,
       updatedAt: i.updatedAt,
+      gitBranchName: i.gitBranchName ?? null,
       assigneeId: i.assigneeId ?? null,
       state: { name: i.status ?? "", type: i.statusType ?? "" },
       team: { id: i.teamId ?? "", key: String(i.id).split("-")[0], name: i.team ?? "" },
@@ -250,6 +253,50 @@ export class LinearClient {
         : [],
       comments,
     };
+  }
+
+  private meCache: { id: string; name: string; teams: { id: string; name: string; key: string }[] } | null = null;
+
+  /** The logged-in user and their teams (cached for the process lifetime). */
+  async me() {
+    if (!this.meCache) {
+      const u = await this.call("get_user", { query: "me" });
+      this.meCache = { id: u.id, name: u.name, teams: u.teams ?? [] };
+    }
+    return this.meCache;
+  }
+
+  /** My tickets currently in any of `states` (status names). */
+  async mineInStates(states: string[]): Promise<IssueRef[]> {
+    const out: IssueRef[] = [];
+    for (const state of states) {
+      const rows = await this.listAll({ assignee: "me", state, fields: ["id", "uuid", "assigneeId", "status", "statusType"] }, 10);
+      out.push(...rows.map(LinearClient.ref));
+    }
+    return out;
+  }
+
+  /** Just the workflow status of one issue, for tracking launched and imported tickets. */
+  async issueState(id: string): Promise<{ name: string; type: string } | null> {
+    try {
+      const i = await this.call("get_issue", { id, fields: ["id", "status", "statusType"] });
+      return { name: i.status ?? "", type: i.statusType ?? "" };
+    } catch (err) {
+      if (/not found/i.test((err as Error).message)) return null;
+      throw err;
+    }
+  }
+
+  /** Workflow statuses of every team I belong to, for the pickup-state picker. */
+  async teamStatuses(): Promise<{ team: string; name: string; type: string }[]> {
+    const out: { team: string; name: string; type: string }[] = [];
+    for (const t of (await this.me()).teams) {
+      const res = await this.call("list_issue_statuses", { team: t.id });
+      for (const s of (Array.isArray(res) ? res : res.statuses ?? []) as { name: string; type: string }[]) {
+        out.push({ team: t.name, name: s.name, type: s.type });
+      }
+    }
+    return out;
   }
 
   /** Moves the issue to its team's started state (needs the "write" scope). */

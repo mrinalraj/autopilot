@@ -12,8 +12,9 @@ import { log } from "./log";
  * linear-autopilot-<version>-darwin-<arch>.tar.gz plus checksums.txt (SHA-256).
  */
 
-const API = process.env.AUTOPILOT_UPDATE_API ?? "https://api.github.com";
-const REPO = process.env.AUTOPILOT_UPDATE_REPO ?? repository;
+// Read at call time so tests (and overrides) can point at another server.
+const api = () => process.env.AUTOPILOT_UPDATE_API ?? "https://api.github.com";
+const repo = () => process.env.AUTOPILOT_UPDATE_REPO ?? repository;
 
 export type InstallKind = "homebrew" | "standalone" | "source";
 
@@ -45,7 +46,7 @@ export const assetName = (ver: string, arch = process.arch === "arm64" ? "arm64"
   `linear-autopilot-${ver}-darwin-${arch}.tar.gz`;
 
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
-  const res = await fetch(`${API}/repos/${REPO}/releases/latest`, {
+  const res = await fetch(`${api()}/repos/${repo()}/releases/latest`, {
     headers: { Accept: "application/vnd.github+json", "User-Agent": `linear-autopilot/${CURRENT}` },
     signal: AbortSignal.timeout(15_000),
   });

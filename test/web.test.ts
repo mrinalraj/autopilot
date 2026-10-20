@@ -14,6 +14,15 @@ const port = 47000 + Math.floor(Math.random() * 900);
 const base = `http://localhost:${port}`;
 let server: ReturnType<typeof startWeb>;
 let store: Store;
+let cfgStateDir: string;
+const health = {
+  items: [
+    { id: "supacode", level: "required", title: "Supacode isn't installed", detail: "needed" },
+    { id: "gh-login", level: "optional", title: "Log in to gh", detail: "for PRs", command: "gh auth login" },
+    { id: "install-app", level: "optional", title: "Install as an app", detail: "dock", browserOnly: true },
+  ],
+  refresh: async () => health.items,
+};
 
 beforeAll(() => {
   process.env.AUTOPILOT_NOTIFY = "off";
@@ -28,8 +37,9 @@ beforeAll(() => {
     ticket_json: JSON.stringify({ description: `<img src=x onerror=alert(1)>`, comments: [], team: "ENG", project: null, labels: [], attachments: [], state: "Todo" }),
     explainer_json: JSON.stringify({ summary: "sum", approach: "app", likely_areas: [], size: "S" }), extra_repos_json: "[]",
   });
+  cfgStateDir = cfg.stateDir;
   const ap = new Autopilot(cfg, store, {} as LinearClient, {} as LLM);
-  server = startWeb(ap);
+  server = startWeb(ap, { health: health as never });
 });
 
 afterAll(() => {
@@ -92,6 +102,27 @@ test("state endpoint reports progress and a change version", async () => {
   expect(s.progress).toEqual({ current: null, done: 0, total: 0 });
   expect(typeof s.version).toBe("string");
   expect(typeof s.awaiting).toBe("number");
+});
+
+test("setup banners: optional ones dismiss and stay dismissed, required ones can't", async () => {
+  let html = await (await fetch(`${base}/`)).text();
+  expect(html).toContain("Supacode isn&#39;t installed");
+  expect(html).toContain("<code>gh auth login</code>");
+  expect(html).toContain('class="tip optional browser-only"');
+  expect(html).not.toContain('action="/banners/supacode/dismiss"');
+
+  const csrf = csrfFrom(html);
+  const post = (path: string) => fetch(`${base}${path}`, { method: "POST", body: new URLSearchParams({ csrf }), headers: { Origin: base }, redirect: "manual" });
+  expect((await post("/banners/gh-login/dismiss")).status).toBe(303);
+  await post("/banners/supacode/dismiss"); // ignored: required
+  html = await (await fetch(`${base}/`)).text();
+  expect(html).not.toContain("Log in to gh");
+  expect(html).toContain("Supacode isn&#39;t installed");
+  expect(html).toContain("Show 1 dismissed tip");
+  expect(new Store(cfgStateDir).dismissedBanners()).toEqual(new Set(["gh-login"])); // persisted
+
+  await post("/banners/restore");
+  expect(await (await fetch(`${base}/`)).text()).toContain("Log in to gh");
 });
 
 test("rejects foreign Host headers (DNS rebinding)", async () => {

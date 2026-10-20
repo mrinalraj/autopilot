@@ -21,8 +21,8 @@ export interface RepoWork extends WorkStatus {
 
 export type WorkStage = "working" | "committed" | "draft" | "pr-open" | "merged" | "pr-closed" | "missing";
 
-async function out(argv: string[], cwd: string): Promise<string> {
-  const proc = Bun.spawn(argv, { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: process.env });
+async function out(argv: string[], cwd: string, env: Record<string, string | undefined> = process.env): Promise<string> {
+  const proc = Bun.spawn(argv, { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore", env });
   const timer = setTimeout(() => proc.kill(), 30_000);
   const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   clearTimeout(timer);
@@ -30,7 +30,22 @@ async function out(argv: string[], cwd: string): Promise<string> {
   return stdout.trim();
 }
 
-export async function checkWork(worktreeId: string, repoPath: string, branch: string): Promise<WorkStatus> {
+let cachedToken: { user: string; token: string; at: number } | null = null;
+
+/**
+ * Environment for `gh` pinned to `user`, so PR tracking doesn't depend on which account is active.
+ * The token stays in memory (refreshed hourly) and is never logged or written.
+ */
+export async function ghEnv(user: string): Promise<Record<string, string | undefined>> {
+  if (!user) return process.env;
+  if (!cachedToken || cachedToken.user !== user || Date.now() - cachedToken.at > 3_600_000) {
+    const token = await out(["gh", "auth", "token", "-h", "github.com", "-u", user], "/");
+    cachedToken = { user, token, at: Date.now() };
+  }
+  return { ...process.env, GH_TOKEN: cachedToken.token };
+}
+
+export async function checkWork(worktreeId: string, repoPath: string, branch: string, githubUser = ""): Promise<WorkStatus> {
   const worktreePath = decodeURIComponent(worktreeId).replace(/\/$/, "");
   const status: WorkStatus = {
     checkedAt: new Date().toISOString(),
@@ -66,7 +81,7 @@ export async function checkWork(worktreeId: string, repoPath: string, branch: st
   try {
     const prs = JSON.parse(
       await out(["gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", "number,url,state,isDraft,title"],
-        status.missing ? repoPath : worktreePath),
+        status.missing ? repoPath : worktreePath, await ghEnv(githubUser)),
     ) as WorkStatus["pr"][];
     status.pr = prs[0] ?? null;
   } catch (err) {

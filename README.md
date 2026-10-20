@@ -17,6 +17,23 @@ Linear (MCP, OAuth) ──▶ newly eligible ticket ──▶ triage: repo + bra
    ──▶ In progress: commits, PR state (git + gh) ──▶ merged
 ```
 
+## Install (Homebrew)
+
+```sh
+scripts/brew-install-local.sh          # builds, then installs via a local tap (repo is private for now)
+linear-autopilot login                 # once, in the browser
+brew services start linear-autopilot   # runs at login, restarts on crash
+open http://localhost:4747
+```
+
+The formula pulls in `terminal-notifier` and `gh` (recommended). `launchd` and `osascript` are part
+of macOS. Under `brew services`, logs go to `$(brew --prefix)/var/log/linear-autopilot.log`.
+
+Once the repo is public:
+1. Run `scripts/brew-formula.sh`, which writes `packaging/linear-autopilot.rb` with GitHub release URLs.
+2. Put that formula in a `homebrew-tap` repo.
+3. Anyone can then run `brew install <you>/tap/linear-autopilot`.
+
 ## Quick start
 
 Requirements: macOS, the Supacode app, the Claude Code CLI (logged in), and `gh` (logged in) for
@@ -73,7 +90,31 @@ Without terminal-notifier, notifications fall back to plain osascript ones that 
 
 ## Using the page
 
-http://localhost:4747 has three sections.
+http://localhost:4747 opens with **setup tips** for anything missing:
+
+| Tip | Type |
+| --- | --- |
+| Claude Code CLI | required |
+| Supacode | required |
+| GitHub CLI login, for PR tracking | optional |
+| terminal-notifier, or its notification permission | optional |
+| Installing the page as an app | optional |
+
+Required tips stay until fixed. Optional ones can be dismissed with ×, and stay dismissed across
+browsers and restarts; "Show N dismissed tips" brings them back. A tip disappears on its own once
+the problem is fixed. The checks rerun every 10 minutes and on **Poll now**.
+
+Below the tips, the page has these sections.
+
+Launched tickets, and work found elsewhere (see Importing existing work), are grouped by phase:
+
+| Section | A ticket lands here when |
+| --- | --- |
+| In progress | it doesn't meet In review or Completed |
+| In review | Linear says In Review, or a PR is open |
+| Completed (collapsible) | Linear says done or canceled, or every touched repo's PR is merged or closed |
+
+Each card shows the live Linear status. The ⚙ button opens **Settings**.
 
 - **Awaiting approval:** one card per triaged ticket, showing repo, branch, size, a repo-confidence
   meter and a summary.
@@ -105,6 +146,55 @@ http://localhost:4747 has three sections.
 While a poll or triage is running, a progress bar shows which ticket is being processed (for
 example "Triaging ENG-2417 · 2 of 4"). The page updates itself, but never reloads while a modal is
 open. **Poll now** checks Linear and refreshes PR state immediately.
+
+## Settings
+
+⚙ opens the settings page. Saving writes `config.json` and applies immediately; only the LLM
+backend needs a restart.
+
+| Section | What you can set |
+| --- | --- |
+| Linear | Statuses that trigger pickup, and statuses to show without triage (picked from your teams' real statuses); the worktree scan on/off; **ticket prefixes** to recognise in branch names (default: your Linear teams' keys) |
+| Polling | How often to check Linear, and how often to check commits and PRs |
+| Launch | Launcher, terminal, worktree folder, base branch, fetch before creating, open in the background, move the ticket to In Progress |
+| Repos | Either **every repo in a parent folder** or **a list of specific repo paths** (they can live anywhere); per repo, include or exclude it and its description |
+| Triage | LLM backend and model; the low-confidence threshold |
+| GitHub | The `gh` account used for PR tracking |
+| Maintenance | Poll now, Reset tickets (triages again straight away), re-run setup checks, show dismissed tips, check for updates, restart, and where config, data and logs live |
+
+## Launchers
+
+| Launcher | Creates worktrees with | Claude session opens in |
+| --- | --- | --- |
+| Supacode (default) | `supacode repo worktree-new` (Supacode's hooks run) | a Supacode tab |
+| Worktrunk | `wt switch --create` (Worktrunk's hooks run) | a new terminal tab |
+| git | `git worktree add` into `<code folder>/wt/<repo>/<branch>` | a new terminal tab |
+| VS Code / Cursor | git, as above; opens the worktree in a new editor window (a multi-root workspace when the ticket spans several repos) | a new terminal tab |
+
+Terminal tabs start in the primary worktree:
+
+| Terminal | Behavior |
+| --- | --- |
+| Terminal | Runs `claude`. Opens a new tab via ⌘T, which needs a one-time Accessibility permission; otherwise a new window. |
+| iTerm | Runs `claude` in a new tab. |
+| Warp | Opens a tab with Warp's own `warp://action/new_tab?path=…`. Warp can't be told to run a command, so the `claude` command is copied to your clipboard and a notification says so. |
+| none | Only creates the worktrees. |
+- **Remembered per ticket:** each ticket records the launcher that made its worktrees, and
+  **Delete worktrees…** removes them with that same tool. Supacode and Worktrunk keep the branch;
+  git uses `git worktree remove`.
+- **First use of Terminal or iTerm:** macOS asks once whether linear-autopilot may control it.
+
+## Importing existing work
+
+On every poll, two kinds of existing work are added under the phase sections, without triage or LLM
+calls:
+
+- **Your tickets in the "also show" statuses** (default *In Development*).
+- **Any worktree whose branch or folder names a ticket** of one of your Linear teams, for example
+  `fix-tab-eng-4821` or `eng-6150`.
+
+A ticket's worktrees in several repos are grouped into one ticket. A ticket with no worktree still
+shows, with its Linear status only. Tickets that already have a card are left alone.
 
 ## Commands
 
@@ -215,6 +305,7 @@ project directory, and `~` is expanded.
 | `oauthCallbackPort` | `4748` | Loopback redirect used by `bun run login`. |
 | `reposRoot` | `~/code` | Every git repo directly under it is a launch target. |
 | `stateDir` / `briefsDir` | `./state` / `./state/briefs` | |
+| `githubUser` | `""` | GitHub account used for PR tracking. Empty means `gh`'s active account. Set it if you keep several `gh` logins, so switching accounts doesn't break tracking. |
 | `linearUserId` | `""` | Empty = the logged-in Linear user. |
 | `processExistingOnFirstRun` | `false` | Triage already-eligible tickets on the very first poll. |
 | `moveToInProgressOnApprove` | `false` | Moves the Linear issue to its team's started state after launch. Needs the write scope: run `bun run login --force` after enabling it. |
@@ -234,7 +325,7 @@ project directory, and `~` is expanded.
 | Linear OAuth tokens | Keychain, service `linear-autopilot`, account `linear-mcp-oauth`. Written by `bun run login`. |
 | Claude (triage) | Your Claude Code login (`llm.provider: "cli"`). |
 | `ANTHROPIC_API_KEY` | Only for `llm.provider: "api"`. Taken from the environment, or from the Keychain (service `linear-autopilot`, account `ANTHROPIC_API_KEY`; add it with `security add-generic-password -s linear-autopilot -a ANTHROPIC_API_KEY -w`). |
-| GitHub (PR tracking) | Your existing `gh` login. |
+| GitHub (PR tracking) | Your `gh` login: the account named in `githubUser` (its token is read with `gh auth token -u` and kept in memory only), or the active account. |
 
 Secrets are never written to config, logs, briefs or SQLite.
 
@@ -283,6 +374,11 @@ bun run typecheck
 | Path | Role |
 | --- | --- |
 | `src/cli.ts` | Command-line entry (and the compiled binary's) |
+| `src/launch.ts` | Launchers: Supacode, Worktrunk, git, VS Code, Cursor |
+| `src/importer.ts` | Worktree scan and ticket-number matching for importing existing work |
+| `src/settings.ts` / `src/settings-page.ts` | Settings validation and saving / the settings page |
+| `src/health.ts` | Setup checks behind the home-screen tips |
+| `src/html.ts` | Shared page shell, styles and the live-update script |
 | `src/daemon.ts` | Daemon: web page, poll loop, work-check loop, update checks |
 | `src/update.ts` / `src/updater.ts` | Release checks and in-place installs / the daemon's update state |
 | `src/service.ts` / `src/env.ts` | LaunchAgent install / PATH and secrets setup for launchd |
@@ -301,4 +397,5 @@ bun run typecheck
 | `src/catalog.ts` | Repo catalog |
 | `src/notify.ts` / `src/keychain.ts` / `src/config.ts` / `src/log.ts` | Helpers |
 | `scripts/build.sh` | Release build |
+| `scripts/brew-formula.sh` / `scripts/brew-install-local.sh` | Homebrew formula (release or local) / local Homebrew install |
 | `test/` | Tests; `fake-supacode.sh` stands in for the Supacode CLI |
