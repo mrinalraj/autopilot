@@ -8,6 +8,7 @@ import { briefPath, initPrompt, removeBrief, snapshot, writeBrief, type TicketSn
 import { isValidBranch, normalizeBranch } from "./branch";
 import { launcherFor, pathFromId, resendIdePrompt, supacodeId, supacodeWorktreePaths } from "./launch";
 import { scanWorktrees, type FoundWorktree } from "./importer";
+import { browserLogin, signOut } from "./login";
 import { launchSteps, step, withTicket } from "./steps";
 import { notify } from "./notify";
 import { atRisk, checkWork, isSettled, overallStage, workFingerprint, type RepoWork } from "./work";
@@ -84,8 +85,8 @@ export class Autopilot {
 
   /** What the daemon is doing right now, for the page's activity banner (triage has its own). */
   activity(): string | null {
-    const launching = [...launchSteps.entries()][0];
-    if (launching) return `Launching ${launching[0]}: ${launching[1]}`;
+    const job = [...launchSteps.entries()][0];
+    if (job) return `${job[0]}: ${job[1]}`;
     if (this.polling) return "Checking Linear for new tickets…";
     if (this.checkingWork) return "Refreshing commits and PR status…";
     return null;
@@ -479,6 +480,7 @@ export class Autopilot {
     const wts = Autopilot.worktrees(row);
     if (!wts.length) return { ok: false, error: "no worktrees to delete" };
 
+    step("Checking the worktrees for unsaved work…");
     const checks = await Promise.all(wts.map(async (w) => ({ ...w, work: await checkWork(w.worktreeId, w.repoPath, row.branch, this.cfg.githubUser) })));
     const live = checks.filter((c) => !c.work.missing);
     if (!live.length) return { ok: false, error: "the worktrees are already gone" };
@@ -489,6 +491,7 @@ export class Autopilot {
     const launcher = launcherFor(this.cfg, row.launcher ?? "supacode");
     for (const c of live) {
       try {
+        step(`Removing the worktree in ${c.repo}…`);
         await launcher.removeWorktree(c.repoPath, c.work.worktreePath, row.branch, force);
         log.info(`${row.identifier}: deleted worktree ${c.work.worktreePath}`);
       } catch (err) {
@@ -505,6 +508,40 @@ export class Autopilot {
    * Undoes a launch: deletes any of the ticket's worktrees that remain (same safety checks as
    * deleteWorktrees) and puts it back in Awaiting approval with its triage intact. Branches stay.
    */
+  /** The outcome of each ticket's last background action, shown on its card until the next one. */
+  readonly notes = new Map<string, { level: "error" | "info"; msg: string }>();
+
+  /**
+   * Runs a slow ticket action in the background: the request returns at once, the card shows the
+   * live step, and the result lands on the card and in the log (closing the page doesn't stop it).
+   */
+  runInBackground(
+    identifier: string,
+    label: string,
+    action: () => Promise<{ ok: true; message: string } | { ok: false; error: string }>,
+  ): { ok: true } | { ok: false; error: string } {
+    if (!this.store.getIssueByIdentifier(identifier)) return { ok: false, error: "unknown issue" };
+    if (launchSteps.has(identifier)) return { ok: false, error: `already working on it (${launchSteps.get(identifier)})` };
+    this.notes.delete(identifier);
+    void withTicket(identifier, async () => {
+      step(label);
+      try {
+        const res = await action();
+        if (res.ok) {
+          log.info(res.message);
+          this.notes.set(identifier, { level: "info", msg: res.message });
+        } else {
+          log.warn(`${identifier}: ${res.error}`);
+          this.notes.set(identifier, { level: "error", msg: res.error });
+        }
+      } catch (err) {
+        log.error(`${identifier}: ${label} failed`, err);
+        this.notes.set(identifier, { level: "error", msg: (err as Error).message });
+      }
+    });
+    return { ok: true };
+  }
+
   async sendBackToApproval(identifier: string, force: boolean): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
     const row = this.store.getIssueByIdentifier(identifier);
     if (!row) return { ok: false, error: "unknown issue" };
@@ -524,6 +561,52 @@ export class Autopilot {
     writeBrief(this.store.getIssue(row.linear_id)!);
     log.info(`${identifier} sent back to approval`);
     return { ok: true, message: `${identifier} is back in Awaiting approval${live.length ? ` (removed ${live.length} worktree${live.length === 1 ? "" : "s"})` : ""}.` };
+  }
+
+  /** Who's signed in to Linear, or null when signed out (or the login was revoked). */
+  async account(): Promise<{ name: string; email: string | null } | null> {
+    try {
+      const me = await this.linear.me();
+      return { name: me.name, email: me.email };
+    } catch (err) {
+      if (err instanceof LoginRequiredError) return null;
+      throw err;
+    }
+  }
+
+  signingIn = false;
+
+  /**
+   * Browser sign-in from the page (switches account if one is signed in). Runs in the background;
+   * the daemon reconnects with the new credentials and polls when it completes.
+   */
+  startSignIn(): { ok: true } | { ok: false; error: string } {
+    if (this.signingIn) return { ok: false, error: "a sign-in is already waiting in your browser" };
+    this.signingIn = true;
+    log.info("Opening Linear in your browser to sign in…");
+    void browserLogin(this.cfg, { force: true })
+      .then(async (me) => {
+        log.info(`Signed in to Linear as ${me.name}${me.email ? ` <${me.email}>` : ""}`);
+        await this.afterAuthChange();
+        void this.poll();
+      })
+      .catch((err) => log.warn("Linear sign-in didn't complete", err))
+      .finally(() => (this.signingIn = false));
+    return { ok: true };
+  }
+
+  async signOutOfLinear() {
+    await signOut(this.cfg);
+    await this.afterAuthChange();
+    this.lastPollError = new LoginRequiredError().message;
+    log.info("Signed out of Linear; polling stops until you sign in again");
+  }
+
+  /** Forget everything cached about the previous account. */
+  private async afterAuthChange() {
+    await this.linear.resetAuth();
+    this.me = null;
+    this.statusCache = null;
   }
 
   /** Sends a VS Code/Cursor ticket's prompt to the editor's chat again (after trusting its folder). */

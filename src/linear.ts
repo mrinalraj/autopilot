@@ -46,7 +46,7 @@ export const CLOSED_STATE_TYPES = new Set(["completed", "canceled", "duplicate"]
 
 export class LoginRequiredError extends Error {
   constructor() {
-    super("Linear login required: run `bun run login` in the linear-autopilot directory");
+    super("Linear login required: sign in from Settings (or run `linear-autopilot login`)");
   }
 }
 
@@ -71,6 +71,11 @@ export class KeychainOAuthProvider implements OAuthClientProvider {
   private async load(): Promise<StoredAuth> {
     this.cache ??= JSON.parse((await keychainGet(KEYCHAIN_ACCOUNT)) ?? "{}");
     return this.cache!;
+  }
+
+  /** Forgets the in-memory copy so the next call re-reads the Keychain (after sign-in or sign-out). */
+  reset() {
+    this.cache = null;
   }
 
   private async save(patch: Partial<StoredAuth>) {
@@ -175,9 +180,16 @@ export class LinearClient {
     this.client = null;
   }
 
-  async viewer(): Promise<{ id: string; name: string }> {
+  async viewer(): Promise<{ id: string; name: string; email: string | null }> {
     const u = await this.call("get_user", { query: "me" });
-    return { id: u.id, name: u.name };
+    return { id: u.id, name: u.name, email: u.email ?? null };
+  }
+
+  /** Drops the connection, cached credentials and cached user, e.g. after signing in or out. */
+  async resetAuth() {
+    (this.provider as { reset?: () => void }).reset?.();
+    this.meCache = null;
+    await this.close();
   }
 
   private async listAll(args: Json, maxPages: number): Promise<Json[]> {
@@ -255,13 +267,13 @@ export class LinearClient {
     };
   }
 
-  private meCache: { id: string; name: string; teams: { id: string; name: string; key: string }[] } | null = null;
+  private meCache: { id: string; name: string; email: string | null; teams: { id: string; name: string; key: string }[] } | null = null;
 
   /** The logged-in user and their teams (cached for the process lifetime). */
   async me() {
     if (!this.meCache) {
       const u = await this.call("get_user", { query: "me" });
-      this.meCache = { id: u.id, name: u.name, teams: u.teams ?? [] };
+      this.meCache = { id: u.id, name: u.name, email: u.email ?? null, teams: u.teams ?? [] };
     }
     return this.meCache;
   }

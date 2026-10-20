@@ -269,6 +269,33 @@ test("send back to approval removes what's left (safely) and lets the ticket be 
   delete process.env.FAKE_SC_WT_ROOT;
 });
 
+test("send back runs in the background: returns at once, shows its step, records refusals", async () => {
+  const { launchSteps } = await import("../src/steps");
+  const wtRoot = join(dir, "wt3");
+  process.env.FAKE_SC_WT_ROOT = wtRoot;
+  linear.add("bg", ME); // ENG-9
+  await ap.poll();
+  ap.approve("ENG-9", "backend", "background job");
+  await waitFor(() => store.getIssueByIdentifier("ENG-9")!.status !== "approved");
+  const wt = join(wtRoot, "backend", "background-job-eng-9");
+  mkdirSync(wt, { recursive: true });
+  Bun.spawnSync(["git", "init", "-q", wt]);
+  writeFileSync(join(wt, "wip.txt"), "unsaved");
+
+  expect(ap.runInBackground("ENG-9", "Sending back to approval…", () => ap.sendBackToApproval("ENG-9", false))).toEqual({ ok: true });
+  expect(launchSteps.has("ENG-9")).toBe(true); // visible right away
+  expect(ap.runInBackground("ENG-9", "again", () => ap.sendBackToApproval("ENG-9", false)).ok).toBe(false); // no double runs
+  await waitFor(() => !launchSteps.has("ENG-9"));
+  expect(ap.notes.get("ENG-9")?.level).toBe("error"); // refused: would lose the uncommitted file
+  expect(store.getIssueByIdentifier("ENG-9")!.status).toBe("running");
+
+  ap.runInBackground("ENG-9", "Sending back to approval…", () => ap.sendBackToApproval("ENG-9", true));
+  await waitFor(() => !launchSteps.has("ENG-9"));
+  expect(store.getIssueByIdentifier("ENG-9")!.status).toBe("pending");
+  expect(ap.notes.get("ENG-9")?.level).toBe("info");
+  delete process.env.FAKE_SC_WT_ROOT;
+});
+
 test("a rejected ticket is re-proposed only after being reassigned", async () => {
   linear.assign("new2", "someone-else");
   await ap.poll();

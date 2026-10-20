@@ -4,6 +4,9 @@ import { esc } from "./html";
 
 export interface SettingsData {
   cfg: Config;
+  /** Signed-in Linear account, null when signed out. */
+  account: { name: string; email: string | null } | null;
+  signingIn: boolean;
   /** My Linear teams' keys, the default ticket prefixes. */
   teamKeys: string[];
   tokenField: string;
@@ -50,6 +53,22 @@ export function settingsBody(d: SettingsData): string {
       <div class="muted small"><a href="/">← Back to tickets</a></div></div></div></div>
     ${d.error ? `<div class="alert" style="margin-top:14px">${esc(d.error)}</div>` : ""}
     ${d.notice ? `<div class="notice">${esc(d.notice)}</div>` : ""}
+    <section class="box" style="margin-top:16px"><h3>Linear account</h3>
+      ${
+        d.signingIn
+          ? `<div class="step" id="signin-wait"><span class="spinner"></span><span>Waiting for you to approve in the browser tab that just opened…</span></div>`
+          : d.account
+            ? `<p style="margin:0 0 12px">Signed in as <strong>${esc(d.account.name)}</strong>${d.account.email ? ` <span class="muted">${esc(d.account.email)}</span>` : ""}</p>`
+            : `<p style="margin:0 0 12px">Not signed in. Tickets aren't checked until you sign in.</p>`
+      }
+      <div class="row">${
+        d.account
+          ? `${action("/actions/linear-signin", "Switch account", "Opening Linear…")}${action("/actions/linear-signout", "Sign out", "Signing out…", "ghost-danger")}`
+          : action("/actions/linear-signin", "Sign in to Linear", "Opening Linear…", "primary")
+      }</div>
+      <div class="muted small" style="margin-top:8px">Sign-in happens in your browser through Linear's own page; credentials stay in the macOS Keychain.</div>
+    </section>
+
     <form method="post" action="/settings" class="settings">${tokenField}
       <section class="box"><h3>Linear</h3>
         <label>Pick up tickets in</label>

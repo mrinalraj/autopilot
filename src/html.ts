@@ -239,6 +239,18 @@ const LIVE_SCRIPT = `(() => {
     });
   });
 
+  // Settings: while a Linear sign-in waits in the browser, reload once it finishes.
+  if (document.getElementById("signin-wait")) {
+    const wait = async () => {
+      try {
+        const s = await (await fetch("/state", { cache: "no-store" })).json();
+        if (!s.signingIn) return location.reload();
+      } catch {}
+      setTimeout(wait, 2000);
+    };
+    setTimeout(wait, 2000);
+  }
+
   const live = document.getElementById("live");
   if (!live) return;
   let version = live.dataset.version, stale = false;

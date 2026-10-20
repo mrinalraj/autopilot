@@ -138,6 +138,13 @@ test("log panel is prefilled, escaped, and /events streams only newer lines", as
   expect(fresh.map((e: { msg: string; level: string }) => [e.level, e.msg])).toEqual([["warn", "marker-two"]]);
 });
 
+test("settings shows the Linear account section (signed out here)", async () => {
+  const html = await (await fetch(`${base}/settings`)).text();
+  expect(html).toContain("Linear account");
+  expect(html).toContain('action="/actions/linear-signin"');
+  expect(html).toContain("Sign in to Linear");
+});
+
 test("rejects foreign Host headers (DNS rebinding)", async () => {
   const res = await fetch(`${base}/`, { headers: { Host: "evil.example:80" } });
   expect(res.status).toBe(403);

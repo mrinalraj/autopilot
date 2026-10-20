@@ -129,7 +129,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
       <div class="pills">${repoPills(r)}${ex.size ? `<span class="pill">size ${esc(ex.size)}</span>` : ""}<span class="pill mono">${esc(r.branch)}</span></div>
       <div class="summary">${esc(ex.summary)}</div>
       ${r.status === "failed" && r.error ? `<div class="alert">${esc(r.error)}</div>` : ""}
-      ${r.status === "approved" ? `<div class="step"><span class="spinner"></span><span data-step="${esc(r.identifier)}">${esc(launchSteps.get(r.identifier) ?? "Starting…")}</span></div>` : ""}
+      ${r.status === "approved" || launchSteps.has(r.identifier) ? stepLine(r) : noteLine(r)}
       ${actions}
     </article>`;
   }
@@ -137,6 +137,15 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
   /** Opens a worktree in the tool that made it (Supacode, VS Code, Cursor); null for terminal launchers. */
   const linkFor = (r: IssueRow, path: string) => launcherFor(ap.cfg, r.launcher ?? "supacode").link(path);
   const worktreeLink = (r: IssueRow) => (r.worktree_id ? linkFor(r, pathFromId(r.worktree_id)) : null);
+
+  /** Live step of a launch or background action on this ticket. */
+  const stepLine = (r: IssueRow) =>
+    `<div class="step"><span class="spinner"></span><span data-step="${esc(r.identifier)}">${esc(launchSteps.get(r.identifier) ?? "Starting…")}</span></div>`;
+  /** Result of the ticket's last background action (e.g. a refused delete). */
+  const noteLine = (r: IssueRow) => {
+    const n = ap.notes.get(r.identifier);
+    return n?.level === "error" ? `<div class="alert">${esc(n.msg)}</div>` : "";
+  };
 
   function workCard(r: IssueRow) {
     const list = Autopilot.work(r);
@@ -151,6 +160,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
       <a class="title" href="#${modalId(r.identifier)}">${esc(r.title)}</a>
       <div class="pills">${r.repo ? repoPills(r) : ""}<span class="pill mono">${esc(r.branch)}</span></div>
       ${summary}
+      ${launchSteps.has(r.identifier) ? stepLine(r) : noteLine(r)}
       <div class="actions">${prs.map((w) => `<a class="btn primary" href="${esc(w.pr!.url)}" target="_blank" rel="noreferrer">${multi ? `${esc(w.repo)} ` : ""}PR #${w.pr!.number} ↗</a>`).join("")}
         ${wt ? `<a class="btn" href="${esc(wt)}">Open worktree</a>` : ""}${resendButton(r)}</div>
     </article>`;
@@ -195,6 +205,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
   /** "Send back to approval…": undo a launch (removes what's left of its worktrees), keeping triage. */
   function sendBackBox(r: IssueRow) {
     if ((r.status !== "running" && r.status !== "failed") || !r.repo) return "";
+    if (launchSteps.has(r.identifier)) return `<div class="box">${stepLine(r)}</div>`;
     const risks = (Autopilot.work(r) ?? []).flatMap((w) => atRisk(w).map((x) => `${w.repo}: ${x}`));
     return `<details class="danger"><summary>Send back to approval…</summary>
       <p class="small muted" style="margin:8px 0 4px">Moves this ticket back to Awaiting approval with its current repo, branch and explainer, so you can approve it again. Any of its worktrees that still exist are removed first (closing their Claude session); its branches are kept and reused.</p>
@@ -208,6 +219,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
   /** "Delete worktrees…" for launched tickets, listing what would be lost from the latest check. */
   function deleteBox(r: IssueRow) {
     if (r.status !== "running" && r.status !== "failed") return "";
+    if (launchSteps.has(r.identifier)) return "";
     const wts = Autopilot.worktrees(r);
     const work = Autopilot.work(r) ?? [];
     const live = wts.filter((w) => !work.find((x) => x.repo === w.repo)?.missing);
@@ -367,7 +379,8 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
     const v = ap.store.db
       .query<{ n: number; t: string | null }, []>("SELECT COUNT(*) AS n, MAX(updated_at) AS t FROM issues")
       .get();
-    return `${v?.n ?? 0}|${v?.t ?? ""}|${ap.lastPollError ?? ""}|${updater?.status ?? ""}|${updater?.info?.latest ?? ""}`;
+    const notes = [...ap.notes.entries()].map(([k, n]) => `${k}:${n.level}:${n.msg.length}`).join(",");
+    return `${v?.n ?? 0}|${v?.t ?? ""}|${ap.lastPollError ?? ""}|${updater?.status ?? ""}|${updater?.info?.latest ?? ""}|${notes}|${[...launchSteps.keys()].join(",")}`;
   }
 
   function indexPage(error?: string, notice?: string) {
@@ -400,7 +413,15 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
        ${updateBanner()}
        <div id="live" data-version="${esc(version())}" data-boot="${bootId}" data-awaiting="${queue.length}">${banner.html}</div>
        ${notice ? `<div class="notice">${esc(notice)}</div>` : ""}
-       ${ap.lastPollError ? `<div class="alert" style="margin-top:14px">Last poll failed: ${esc(ap.lastPollError)}</div>` : ""}
+       ${
+         ap.lastPollError
+           ? `<div class="alert" style="margin-top:14px">Last poll failed: ${esc(ap.lastPollError)}${
+               /login required/i.test(ap.lastPollError)
+                 ? `<form method="post" action="/actions/linear-signin" style="margin-top:8px">${tokenField}<button class="primary" data-busy-label="Opening Linear…">Sign in to Linear</button></form>`
+                 : ""
+             }</div>`
+           : ""
+       }
        ${error ? `<div class="alert" style="margin-top:14px">${esc(error)}</div>` : ""}
        <div class="section"><h2>Awaiting approval</h2><span class="count">${queue.length}</span></div>
        ${queue.length ? `<div class="grid">${queue.map(card).join("")}</div>`
@@ -462,6 +483,18 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
             return redirect(`/settings?error=${encodeURIComponent(`Reset failed: ${(err as Error).message}`)}`);
           }
         }
+        if (path === "/actions/linear-signin") {
+          const res = ap.startSignIn();
+          return redirect(
+            res.ok
+              ? `/settings?notice=${encodeURIComponent("Linear opened in your browser: approve access there, and this page updates once you're signed in.")}`
+              : `/settings?error=${encodeURIComponent(res.error)}`,
+          );
+        }
+        if (path === "/actions/linear-signout") {
+          await ap.signOutOfLinear();
+          return redirect(`/settings?notice=${encodeURIComponent("Signed out of Linear.")}`);
+        }
         if (path === "/actions/trust-folder") {
           // Opening the folder makes the editor ask "Do you trust the authors?"; the choice stays with the user.
           const editorApp = ap.cfg.launch.launcher === "cursor" ? "Cursor" : "Visual Studio Code";
@@ -499,14 +532,24 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
         const back = path.match(/^\/issues\/([^/]+)\/send-back$/);
         if (back) {
           const identifier = decodeURIComponent(back[1]);
-          const res = await ap.sendBackToApproval(identifier, form.get("force") === "1");
-          return redirect(res.ok ? `/?notice=${encodeURIComponent(res.message)}` : `/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}`);
+          const force = form.get("force") === "1";
+          const res = ap.runInBackground(identifier, "Sending back to approval…", () => ap.sendBackToApproval(identifier, force));
+          return redirect(
+            res.ok
+              ? `/?logs=1&notice=${encodeURIComponent(`Sending ${identifier} back to approval in the background; you can close this.`)}`
+              : `/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}`,
+          );
         }
         const del = path.match(/^\/issues\/([^/]+)\/delete-worktrees$/);
         if (del) {
           const identifier = decodeURIComponent(del[1]);
-          const res = await ap.deleteWorktrees(identifier, form.get("force") === "1");
-          return redirect(res.ok ? `/?notice=${encodeURIComponent(res.message)}` : `/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}#${modalId(identifier)}`);
+          const force = form.get("force") === "1";
+          const res = ap.runInBackground(identifier, "Deleting worktrees…", () => ap.deleteWorktrees(identifier, force));
+          return redirect(
+            res.ok
+              ? `/?logs=1&notice=${encodeURIComponent(`Deleting ${identifier}'s worktrees in the background; you can close this.`)}`
+              : `/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}`,
+          );
         }
         const m = path.match(/^\/issues\/([^/]+)\/(approve|reject)$/);
         if (m) {
@@ -527,7 +570,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
       if (path === "/state") {
         const awaiting = ap.store.listByStatus(["pending", "failed"]).length;
         return Response.json(
-          { polling: ap.polling, activity: ap.activity(), progress: ap.progress, version: version(), awaiting, launching: Object.fromEntries(launchSteps), boot: bootId },
+          { polling: ap.polling, activity: ap.activity(), progress: ap.progress, version: version(), awaiting, launching: Object.fromEntries(launchSteps), boot: bootId, signingIn: ap.signingIn },
           { headers: { "Cache-Control": "no-store" } },
         );
       }
@@ -537,11 +580,18 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
         return Response.json({ ok: true, lastPollAt: ap.lastPollAt, lastPollError: ap.lastPollError, progress: ap.progress });
       }
       if (path === "/settings") {
-        const [statuses, ghAccounts, teamKeys] = await Promise.all([ap.statusOptions(), Promise.resolve(githubAccounts()), ap.teamKeys()]);
+        const [statuses, ghAccounts, teamKeys, account] = await Promise.all([
+          ap.statusOptions(),
+          Promise.resolve(githubAccounts()),
+          ap.teamKeys(),
+          ap.account().catch(() => null),
+        ]);
         return page(
           "Settings · Linear autopilot",
           settingsBody({
             cfg: ap.cfg,
+            account,
+            signingIn: ap.signingIn,
             tokenField,
             statuses,
             ghAccounts,
