@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "repository": "mrinalraj/linear-autopilot",
+  "license": "MIT",
   "bin": {
     "linear-autopilot": "src/cli.ts"
   },

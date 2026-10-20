@@ -1,7 +1,7 @@
 #!/bin/bash
 # Writes the Homebrew formula for the tarballs in dist/.
 #   scripts/brew-formula.sh                      → release URLs on GitHub (for a tap repo)
-#   scripts/brew-formula.sh --local <out.rb>     → file:// URLs to dist/ (local install, private repo)
+#   scripts/brew-formula.sh --local <out.rb>     → file:// URLs to dist/ (local install)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 VERSION=$(bun -e 'console.log(require("./package.json").version)')

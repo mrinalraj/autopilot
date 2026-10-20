@@ -20,7 +20,7 @@ Linear (MCP, OAuth) ──▶ newly eligible ticket ──▶ triage: repo + bra
 ## Install (Homebrew)
 
 ```sh
-scripts/brew-install-local.sh          # builds, then installs via a local tap (repo is private for now)
+brew install mrinalraj/tap/linear-autopilot
 linear-autopilot login                 # once, in the browser
 brew services start linear-autopilot   # runs at login, restarts on crash
 open http://localhost:4747
@@ -29,10 +29,8 @@ open http://localhost:4747
 The formula pulls in `terminal-notifier` and `gh` (recommended). `launchd` and `osascript` are part
 of macOS. Under `brew services`, logs go to `$(brew --prefix)/var/log/linear-autopilot.log`.
 
-Once the repo is public:
-1. Run `scripts/brew-formula.sh`, which writes `packaging/linear-autopilot.rb` with GitHub release URLs.
-2. Put that formula in a `homebrew-tap` repo.
-3. Anyone can then run `brew install <you>/tap/linear-autopilot`.
+To install your own build instead, run `scripts/brew-install-local.sh` (builds, then installs from
+a local tap).
 
 ## Quick start
 
@@ -257,6 +255,8 @@ command line.
 
 To release, bump `version` in `package.json`, build, and attach those three files to a GitHub
 release tagged `v<version>`. The updater relies on exactly these names.
+Then run `scripts/brew-formula.sh`, which writes `packaging/linear-autopilot.rb` with the release
+URLs, and copy it to `Formula/` in the [tap repo](https://github.com/mrinalraj/homebrew-tap).
 
 ## How it works
 
@@ -416,3 +416,7 @@ bun run typecheck
 | `scripts/build.sh` | Release build |
 | `scripts/brew-formula.sh` / `scripts/brew-install-local.sh` | Homebrew formula (release or local) / local Homebrew install |
 | `test/` | Tests; `fake-supacode.sh` stands in for the Supacode CLI |
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -6,3 +6,4 @@ catalog.cache.json
 .DS_Store
 .claude/settings.local.json
 dist/
+packaging/
