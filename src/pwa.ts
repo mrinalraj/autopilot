@@ -57,7 +57,7 @@ export const MANIFEST = {
 
 // Network-only for everything (ticket data and CSRF tokens must never be stale). The one thing it
 // adds is an offline page when the daemon isn't running, so the installed app explains itself.
-export const SERVICE_WORKER = `const CACHE = "autopilot-v2";
+export const SERVICE_WORKER = `const CACHE = "autopilot-v3";
 const OFFLINE = "/offline.html";
 
 self.addEventListener("install", (event) => {
@@ -107,6 +107,7 @@ export const offlinePage = (port: number, logPath: string) => `<!doctype html>
     <p>The local daemon behind this app isn't answering on port ${port}. Restart it with:</p>
     <code>linear-autopilot service restart</code>
     <p>Logs: <code>${logPath}</code></p>
+    ${port !== 4747 ? `<p><strong>Installed from a different port?</strong> An installed app is tied to the address it was installed from. If linear-autopilot now runs on its default port, <a href="http://localhost:4747/">open http://localhost:4747</a> and install the app from there.</p>` : ""}
     <p>This page retries every 10 seconds.</p>
   </div>
 </body>
