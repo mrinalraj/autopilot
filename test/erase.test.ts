@@ -53,9 +53,9 @@ test("erase all removes every ticket, brief and cache but keeps settings; the ne
   expect(ap.store.unhandled().map((a) => a.identifier)).toEqual(["ENG-3"]);
 });
 
-test("resetting settings keeps only what sign-in and the address depend on", () => {
+test("resetting settings keeps only what sign-in and the address depend on, and runs setup again", () => {
   const path = join(dir, "config.json");
   writeFileSync(path, JSON.stringify({ tracker: "jira", jira: { site: "acme", pickupStates: ["To Do"] }, port: 4999, reposRoot: "~/x", githubUser: "me" }));
   resetSettingsFile(path);
-  expect(JSON.parse(require("node:fs").readFileSync(path, "utf8"))).toEqual({ tracker: "jira", port: 4999, jira: { site: "acme" } });
+  expect(JSON.parse(require("node:fs").readFileSync(path, "utf8"))).toEqual({ onboarded: false, tracker: "jira", port: 4999, jira: { site: "acme" } });
 });

@@ -53,10 +53,12 @@ export interface Config {
   port: number;
   /** Loopback port for the one-time OAuth redirect during `bun run login`. */
   oauthCallbackPort: number;
-  /** "folder": every git repo directly inside reposRoot. "list": exactly the repos in repoPaths. */
-  repoMode: "folder" | "list";
-  reposRoot: string;
+  /** Parent folders: every git repo directly inside each is in play. */
+  repoRoots: string[];
+  /** Individual repos, wherever they live; combined with repoRoots. */
   repoPaths: string[];
+  /** Set once the first-run setup is finished; nothing is polled before that. */
+  onboarded: boolean;
   /** Ticket prefixes (ENG, IT, …) recognised in branch and worktree names. Empty = my Linear teams' keys. */
   ticketPrefixes: string[];
   /** Default: <home>/state for Linear, <home>/state/jira for Jira, so their tickets never mix. */
@@ -96,7 +98,7 @@ export interface Config {
     ideSession: "chat" | "terminal";
     /** Cursor's chat panel: Cursor's own agent, or the Claude Code extension. */
     cursorChat: "cursor" | "claude";
-    /** Where the git, vscode and cursor launchers put worktrees. Default: <reposRoot>/wt */
+    /** Where the git, vscode and cursor launchers put worktrees. Default: <first repo folder>/wt, else ~/worktrees */
     worktreesDir: string;
     supacodeBin: string;
     claudeBin: string;
@@ -115,9 +117,9 @@ const DEFAULTS: Config = {
   workCheckIntervalSeconds: 300,
   port: COMPILED ? 4747 : 4800, // from source, stay clear of the installed app
   oauthCallbackPort: 4748,
-  repoMode: "folder",
-  reposRoot: join(homedir(), "code"),
+  repoRoots: [],
   repoPaths: [],
+  onboarded: false,
   ticketPrefixes: [],
   stateDir: "",
   briefsDir: "",
@@ -150,7 +152,8 @@ const DEFAULTS: Config = {
 };
 
 export function loadConfig(path = CONFIG_PATH): Config {
-  const user = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+  const found = existsSync(path);
+  const user = found ? JSON.parse(readFileSync(path, "utf8")) : {};
   const cfg: Config = {
     ...DEFAULTS,
     ...user,
@@ -159,9 +162,16 @@ export function loadConfig(path = CONFIG_PATH): Config {
     launch: { ...DEFAULTS.launch, ...user.launch },
     repos: { ...DEFAULTS.repos, ...user.repos },
   };
-  cfg.reposRoot = expandHome(cfg.reposRoot);
+  // Older configs had one parent folder (reposRoot, default ~/code) or, in "list" mode, only repoPaths.
+  if (!Array.isArray(user.repoRoots) && found) {
+    cfg.repoRoots = user.repoMode === "list" ? [] : [user.reposRoot ?? "~/code"];
+    if (user.repoMode !== "list") cfg.repoPaths = [];
+  }
+  for (const legacy of ["reposRoot", "repoMode"]) delete (cfg as unknown as Record<string, unknown>)[legacy];
+  cfg.repoRoots = (cfg.repoRoots ?? []).map(expandHome);
   cfg.repoPaths = (cfg.repoPaths ?? []).map(expandHome);
-  if (cfg.repoMode !== "list") cfg.repoMode = "folder";
+  // Installs from before the setup flow are already set up.
+  cfg.onboarded = typeof user.onboarded === "boolean" ? user.onboarded : found;
   cfg.ticketPrefixes = (cfg.ticketPrefixes ?? []).map((p) => p.trim().toUpperCase()).filter(Boolean);
   if (!TRACKER_KINDS.includes(cfg.tracker)) cfg.tracker = "linear";
   if (cfg.tracker === "jira") {
@@ -172,7 +182,7 @@ export function loadConfig(path = CONFIG_PATH): Config {
   cfg.briefsDir = cfg.briefsDir ? expandHome(cfg.briefsDir) : join(cfg.stateDir, "briefs");
   cfg.launch.worktreesDir = cfg.launch.worktreesDir
     ? expandHome(cfg.launch.worktreesDir)
-    : cfg.repoMode === "list" ? join(homedir(), "worktrees") : join(cfg.reposRoot, "wt");
+    : cfg.repoRoots[0] ? join(cfg.repoRoots[0], "wt") : join(homedir(), "worktrees");
   if (!LAUNCHERS.includes(cfg.launch.launcher)) cfg.launch.launcher = "supacode";
   return cfg;
 }

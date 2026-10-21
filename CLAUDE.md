@@ -57,6 +57,12 @@ Never derive paths from `import.meta.dir` elsewhere: inside the binary it's Bun'
   JQL must be bounded, and naming a status the site lacks fails the whole query. Statuses use
   Linear's type vocabulary (Jira's categories new/indeterminate/done map to
   unstarted/started/completed). `linear_*` DB columns hold the active tracker's IDs and status.
+- First-run setup (`onboarding.ts`, `/setup`): repos → gh account (required) → tracker sign-in →
+  statuses → overview. Until `cfg.onboarded`, nothing polls: call `pollIfReady()` (not `poll()`)
+  from timers and web actions. The web layer writes settings through its `configPath` and reads
+  gh through its `gh` extra, so tests never touch the real config or gh.
+- Repos are `repoRoots` (parent folders) plus `repoPaths` (individual repos), combined in
+  `repoSources`; `loadConfig` migrates the old `reposRoot`/`repoMode`.
 - Each tracker has its own state dir (`state/` for Linear, `state/jira/` for Jira) and its own
   pickup/import statuses (`jira.pickupStates` …), so ticket keys and briefs never mix. Switching
   (`Autopilot.switchTracker`) swaps the store and client live and is refused mid-check or launch.

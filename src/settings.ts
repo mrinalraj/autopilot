@@ -1,17 +1,84 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { CONFIG_PATH, expandHome, LAUNCHERS, loadConfig, type Config, type LauncherName } from "./config";
-import { listRepos } from "./catalog";
+import { listRepos, repoSources } from "./catalog";
 import { TRACKER_KINDS, type TrackerKind } from "./tracker";
 
-/** gh accounts logged in on this machine (for the PR-tracking account picker). */
-export function githubAccounts(): string[] {
+export interface GithubStatus {
+  installed: boolean;
+  accounts: { name: string; active: boolean }[];
+}
+
+/** gh on this machine: installed, and the github.com accounts logged in (for the PR-tracking picker). */
+export function githubStatus(): GithubStatus {
+  if (!Bun.which("gh", { PATH: process.env.PATH })) return { installed: false, accounts: [] };
   try {
     const p = Bun.spawnSync(["gh", "auth", "status", "-h", "github.com"], { stdout: "pipe", stderr: "pipe", env: process.env });
-    const text = `${p.stdout}${p.stderr}`;
-    return [...text.matchAll(/account (\S+)/g)].map((m) => m[1]);
+    const accounts: GithubStatus["accounts"] = [];
+    for (const line of `${p.stdout}${p.stderr}`.split("\n")) {
+      const acct = /Logged in to github\.com account (\S+)/.exec(line)?.[1];
+      if (acct) accounts.push({ name: acct, active: false });
+      else if (/Active account: true/.test(line) && accounts.length) accounts[accounts.length - 1].active = true;
+    }
+    return { installed: true, accounts };
   } catch {
-    return [];
+    return { installed: true, accounts: [] };
   }
+}
+
+export const githubAccounts = (): string[] => githubStatus().accounts.map((a) => a.name);
+
+type Raw = Record<string, any>;
+const readRaw = (path: string): Raw => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {});
+
+/** Edits config.json (keeping keys nobody manages here) and applies it to the running config. */
+export function patchConfig(cfg: Config, patch: (raw: Raw) => void, path = CONFIG_PATH) {
+  const raw = readRaw(path);
+  patch(raw);
+  writeFileSync(path, JSON.stringify(raw, null, 2) + "\n");
+  Object.assign(cfg, loadConfig(path));
+}
+
+/** Problems with a set of parent folders and individual repos, or none. */
+export function checkRepos(roots: string[], paths: string[]): string[] {
+  const errors: string[] = [];
+  for (const r of roots) {
+    const p = expandHome(r);
+    if (!existsSync(p) || !statSync(p).isDirectory()) errors.push(`Folder "${r}" doesn't exist.`);
+  }
+  for (const p of paths) if (!existsSync(join(expandHome(p), ".git"))) errors.push(`"${p}" isn't a git repo.`);
+  if (errors.length) return errors;
+  if (!roots.length && !paths.length) return ["Add at least one folder or repo."];
+  if (!repoSources({ repoRoots: roots.map(expandHome), repoPaths: paths.map(expandHome) } as Config).length) return ["No git repos found in those folders."];
+  return [];
+}
+
+export function writeRepos(raw: Raw, roots: string[], paths: string[]) {
+  raw.repoRoots = roots;
+  raw.repoPaths = paths;
+  delete raw.reposRoot;
+  delete raw.repoMode;
+}
+
+/** Folders picked in Finder: a git repo joins the individual repos, anything else the parent folders. */
+export function addPicked(cfg: Config, picked: string[], path = CONFIG_PATH): string[] {
+  const roots = [...cfg.repoRoots];
+  const paths = [...cfg.repoPaths];
+  for (const p of picked.map((x) => x.replace(/\/$/, ""))) {
+    const list = existsSync(join(p, ".git")) ? paths : roots;
+    if (!list.includes(p)) list.push(p);
+  }
+  const errors = checkRepos(roots, paths);
+  if (!errors.length) patchConfig(cfg, (raw) => writeRepos(raw, roots, paths), path);
+  return errors;
+}
+
+/** Pickup/import statuses from a form; each tracker keeps its own (Linear's at the top level, for older configs). */
+export function writeStatuses(raw: Raw, cfg: Config, form: FormData) {
+  const states = { pickupStates: list(form, "pickupStates", "pickupStatesOther"), importStates: list(form, "importStates", "importStatesOther") };
+  if (cfg.tracker === "jira") raw.jira = { ...raw.jira, ...states };
+  else Object.assign(raw, states);
+  raw.importWorktrees = form.get("importWorktrees") === "on";
 }
 
 export interface SaveResult {
@@ -39,16 +106,10 @@ export function saveSettings(cfg: Config, form: FormData, path = CONFIG_PATH): S
   const pollMinutes = num("pollMinutes", 1, 1440, "Poll interval (minutes)");
   const workMinutes = num("workMinutes", 1, 1440, "PR check interval (minutes)");
   const threshold = num("lowConfidenceThreshold", 0, 1, "Low-confidence threshold");
-  const repoMode = form.get("repoMode") === "list" ? "list" : "folder";
-  const reposRoot = String(form.get("reposRoot") ?? "").trim();
-  const repoPaths = String(form.get("repoPaths") ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
-  if (repoMode === "folder" && (!reposRoot || !existsSync(expandHome(reposRoot)) || !statSync(expandHome(reposRoot)).isDirectory())) {
-    errors.push(`Code folder "${reposRoot}" doesn't exist.`);
-  }
-  if (repoMode === "list") {
-    if (!repoPaths.length) errors.push("Add at least one repo path, or switch to a parent folder.");
-    for (const p of repoPaths) if (!existsSync(`${expandHome(p)}/.git`)) errors.push(`"${p}" isn't a git repo.`);
-  }
+  const lines = (name: string) => String(form.get(name) ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const repoRoots = lines("repoRoots");
+  const repoPaths = lines("repoPaths");
+  errors.push(...checkRepos(repoRoots, repoPaths));
   const ticketPrefixes = String(form.get("ticketPrefixes") ?? "").split(/[\s,]+/).map((p) => p.trim().toUpperCase()).filter(Boolean);
   for (const p of ticketPrefixes) if (!/^[A-Z][A-Z0-9]{0,9}$/.test(p)) errors.push(`Ticket prefix "${p}" should be letters/digits, like ENG.`);
   const launcher = String(form.get("launcher") ?? "") as LauncherName;
@@ -61,19 +122,13 @@ export function saveSettings(cfg: Config, form: FormData, path = CONFIG_PATH): S
   if (!model) errors.push("Model can't be empty.");
   if (errors.length) return { errors, notes };
 
-  const raw: Record<string, any> = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+  const raw = readRaw(path);
   const before = { provider: cfg.llm.provider, move: cfg.moveToInProgressOnApprove };
 
-  // Each tracker keeps its own statuses; Linear's live at the top level for older configs.
-  const states = { pickupStates: list(form, "pickupStates", "pickupStatesOther"), importStates: list(form, "importStates", "importStatesOther") };
-  if (cfg.tracker === "jira") raw.jira = { ...raw.jira, ...states };
-  else Object.assign(raw, states);
-  raw.importWorktrees = form.get("importWorktrees") === "on";
+  writeStatuses(raw, cfg, form);
   raw.pollIntervalSeconds = Math.round(pollMinutes * 60);
   raw.workCheckIntervalSeconds = Math.round(workMinutes * 60);
-  raw.repoMode = repoMode;
-  if (reposRoot) raw.reposRoot = reposRoot;
-  raw.repoPaths = repoPaths;
+  writeRepos(raw, repoRoots, repoPaths);
   raw.ticketPrefixes = ticketPrefixes;
   raw.githubUser = String(form.get("githubUser") ?? "");
   raw.moveToInProgressOnApprove = form.get("moveToInProgressOnApprove") === "on";
@@ -93,7 +148,7 @@ export function saveSettings(cfg: Config, form: FormData, path = CONFIG_PATH): S
 
   // Repo catalog: descriptions that differ from the derived ones, and exclusions.
   const repos: Record<string, { description?: string; exclude?: boolean }> = {};
-  for (const r of listRepos({ ...cfg, repoMode, reposRoot: expandHome(reposRoot || cfg.reposRoot), repoPaths: repoPaths.map(expandHome) })) {
+  for (const r of listRepos({ ...cfg, repoRoots: repoRoots.map(expandHome), repoPaths: repoPaths.map(expandHome) })) {
     const desc = String(form.get(`desc:${r.name}`) ?? "").trim();
     const entry: { description?: string; exclude?: boolean } = {};
     if (desc && desc !== r.derived) entry.description = desc;
@@ -121,17 +176,17 @@ export function saveTracker(form: FormData, path = CONFIG_PATH): { ok: true; tra
   if (!TRACKER_KINDS.includes(tracker)) return { ok: false, error: "Pick Linear or Jira." };
   const site = String(form.get("jiraSite") ?? "").trim();
   if (site && !/^[\w.-]+(\.[\w.-]+)*(\/.*)?$/.test(site.replace(/^https?:\/\//, ""))) return { ok: false, error: `"${site}" doesn't look like a Jira site.` };
-  const raw: Record<string, any> = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+  const raw = readRaw(path);
   raw.tracker = tracker;
   if (form.has("jiraSite")) raw.jira = { ...raw.jira, site };
   writeFileSync(path, JSON.stringify(raw, null, 2) + "\n");
   return { ok: true, tracker };
 }
 
-/** Back to default settings, keeping what the sign-in and the address depend on. */
+/** Back to default settings, keeping what the sign-in and the address depend on; setup runs again. */
 export function resetSettingsFile(path = CONFIG_PATH) {
-  const raw: Record<string, any> = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
-  const kept: Record<string, any> = {};
+  const raw = readRaw(path);
+  const kept: Raw = { onboarded: false };
   for (const k of ["tracker", "port", "oauthCallbackPort"]) if (k in raw) kept[k] = raw[k];
   if (raw.jira?.site) kept.jira = { site: raw.jira.site };
   writeFileSync(path, JSON.stringify(kept, null, 2) + "\n");

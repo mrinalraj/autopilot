@@ -17,7 +17,7 @@ test("a different GitHub account re-checks settled tickets too", async () => {
   const repo = join(dir, "repos", "api");
   mkdirSync(repo, { recursive: true });
   Bun.spawnSync(["git", "init", "-q", repo]);
-  const cfg = { ...loadConfig("/nonexistent"), reposRoot: join(dir, "repos"), stateDir: join(dir, "state"), githubUser: "work-account" };
+  const cfg = { ...loadConfig("/nonexistent"), repoRoots: [join(dir, "repos")], stateDir: join(dir, "state"), githubUser: "work-account" };
   const store = new Store(cfg.stateDir);
   store.upsertIssue({
     linear_id: "x", identifier: "ENG-1", title: "Done thing", url: "u", brief_path: join(dir, "ENG-1.md"), repo: "api", repo_path: repo,

@@ -200,6 +200,16 @@ async function gitWorktreeRemove(repoPath: string, worktreePath: string, force: 
   await run(["git", "-C", repoPath, "worktree", "remove", ...(force ? ["--force"] : []), worktreePath], 120_000);
 }
 
+/** Runs a one-off interactive command (e.g. `gh auth login`) in a new iTerm or Terminal window. */
+export async function runInTerminal(cfg: Config, command: string) {
+  if (cfg.launch.terminal === "iterm") {
+    await run(["osascript", "-e", "on run argv", "-e", 'tell application "iTerm"', "-e", "activate", "-e", "create window with default profile",
+      "-e", "tell current session of current window to write text (item 1 of argv)", "-e", "end tell", "-e", "end run", command], 60_000);
+    return;
+  }
+  await run(["osascript", "-e", "on run argv", "-e", 'tell application "Terminal"', "-e", "activate", "-e", "do script (item 1 of argv)", "-e", "end tell", "-e", "end run", command], 60_000);
+}
+
 /**
  * Opens a new tab in the worktree and starts `claude` there. Text reaches AppleScript as argv,
  * never as code. Terminal has no "new tab" command: ⌘T via System Events needs Accessibility, and

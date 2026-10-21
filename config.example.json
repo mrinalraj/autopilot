@@ -3,7 +3,9 @@
   "workCheckIntervalSeconds": 300,
   "port": 4747,
   "oauthCallbackPort": 4748,
-  "reposRoot": "~/code",
+  "repoRoots": ["~/code"],
+  "repoPaths": [],
+  "onboarded": true,
   "githubUser": "",
   "linearUserId": "",
   "pickupStates": [

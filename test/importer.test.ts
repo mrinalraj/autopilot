@@ -47,7 +47,7 @@ beforeAll(() => {
   git(join(reposRoot, "api"), "worktree", "add", "-q", "-b", "random-work", join(dir, "wt", "api", "random-work"));
   const base = loadConfig("/nonexistent");
   cfg = {
-    ...base, reposRoot, stateDir: join(dir, "state"), briefsDir: join(dir, "state", "briefs"),
+    ...base, repoRoots: [reposRoot], stateDir: join(dir, "state"), briefsDir: join(dir, "state", "briefs"),
     importStates: ["In Development"], importWorktrees: true,
     launch: { ...base.launch, supacodeBin: "/nonexistent", fetch: false, base: "main", terminal: "none", worktreesDir: join(dir, "made") },
   };
@@ -83,6 +83,22 @@ test("imports worktree tickets (grouped across repos) and In Development tickets
   expect(phaseOf(b, Autopilot.work(b))).toBe("in-progress");
 
   expect(await ap.importExisting()).toEqual([]); // nothing twice
+});
+
+test("a ticket awaiting approval that already has a worktree moves to In progress, keeping its triage", async () => {
+  git(join(reposRoot, "api"), "worktree", "add", "-q", "-b", "started-elsewhere-eng-60", join(dir, "wt", "api", "started-elsewhere-eng-60"));
+  store.upsertIssue({
+    linear_id: "u60", identifier: "ENG-60", title: "Ticket ENG-60", url: "u", brief_path: join(dir, "state", "briefs", "ENG-60.md"),
+    repo: "web", repo_path: join(reposRoot, "web"), branch: "proposed-name-eng-60", confidence: 0.6, resolve_reason: "model's pick",
+    status: "pending", error: null, worktree_id: null,
+    ticket_json: JSON.stringify({ description: null, comments: [], team: "ENG (Eng)", project: null, labels: [], attachments: [], state: "Ready for Development" }), explainer_json: JSON.stringify({ summary: "s", approach: "a", likely_areas: [], size: "S" }),
+    extra_repos_json: "[]",
+  });
+  expect(await ap.importExisting()).toEqual(["ENG-60"]);
+  const row = store.getIssueByIdentifier("ENG-60")!;
+  expect([row.status, row.repo, row.branch, row.resolve_reason]).toEqual(["running", "api", "started-elsewhere-eng-60", "model's pick"]);
+  expect(row.worktree_id).not.toBeNull();
+  expect(await ap.importExisting()).toEqual([]);
 });
 
 test("configured ticket prefixes replace the Linear team keys for matching", async () => {

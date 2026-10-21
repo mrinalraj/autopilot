@@ -1,3 +1,4 @@
+import { repoSources } from "./catalog";
 import { existsSync, readdirSync } from "node:fs";
 import type { Config } from "./config";
 import { notifyState } from "./notify";
@@ -136,16 +137,16 @@ export class Health {
       );
     }
 
-    if (this.cfg.repoMode === "list" && this.cfg.repoPaths.length === 0) {
-      items.push({ id: "repos-empty", level: "required", title: "No repos selected", detail: "Settings → Repos is set to specific repos, but the list is empty, so tickets can't be routed." });
+    if (repoSources(this.cfg).length === 0) {
+      items.push({ id: "repos-empty", level: "required", title: "No repos found", detail: "None of the folders in Settings → Repos contains a git repo, so tickets can't be routed." });
     }
 
     if (!Bun.which("gh", { PATH: process.env.PATH })) {
       items.push({
         id: "gh-install",
-        level: "optional",
-        title: "Track pull requests with the GitHub CLI",
-        detail: "Install gh and log in to see each launched ticket's PR (open, draft, merged) on its card.",
+        level: "required",
+        title: "Install the GitHub CLI",
+        detail: "Commits and pull requests (open, draft, merged) are tracked with gh, so it's required.",
         command: "brew install gh && gh auth login",
       });
     } else {
@@ -156,7 +157,7 @@ export class Health {
       if (!loggedIn) {
         items.push({
           id: "gh-login",
-          level: "optional",
+          level: "required",
           title: user ? `GitHub CLI isn't logged in as ${user}` : "Log in to the GitHub CLI to track pull requests",
           detail: "PR status on launched tickets comes from gh. Log in with an account that can see your repos" +
             (user ? ` (githubUser in config.json is "${user}").` : "."),

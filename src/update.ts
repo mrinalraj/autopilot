@@ -54,14 +54,39 @@ export function newer(a: string, b: string): boolean {
 export const assetName = (ver: string, arch = process.arch === "arm64" ? "arm64" : "x64") =>
   `autopilot-${ver}-darwin-${arch}.tar.gz`;
 
+interface Release {
+  tag_name: string;
+  html_url: string;
+  body?: string;
+  draft?: boolean;
+  prerelease?: boolean;
+  assets?: { name: string; browser_download_url: string }[];
+}
+
+/**
+ * The newest release this install should move to. GitHub's /releases/latest skips pre-releases,
+ * so a beta install picks from the list instead: betas follow betas and releases; a release
+ * install only follows releases.
+ */
+export function pickRelease(releases: Release[], current = CURRENT): Release | null {
+  const betas = current.includes("-");
+  let best: Release | null = null;
+  for (const r of releases) {
+    if (r.draft || (r.prerelease && !betas)) continue;
+    if (!best || newer(r.tag_name, best.tag_name)) best = r;
+  }
+  return best;
+}
+
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
-  const res = await fetch(`${api()}/repos/${repo()}/releases/latest`, {
+  const res = await fetch(`${api()}/repos/${repo()}/releases?per_page=30`, {
     headers: { Accept: "application/vnd.github+json", "User-Agent": `autopilot/${CURRENT}` },
     signal: AbortSignal.timeout(15_000),
   });
-  if (res.status === 404) return null; // no releases yet (or the repo isn't public)
+  if (res.status === 404) return null; // the repo isn't reachable (renamed, or not public)
   if (!res.ok) throw new Error(`GitHub releases: HTTP ${res.status}`);
-  const rel = (await res.json()) as { tag_name: string; html_url: string; body?: string; assets?: { name: string; browser_download_url: string }[] };
+  const rel = pickRelease((await res.json()) as Release[]);
+  if (!rel) return null; // no releases yet
   const latest = rel.tag_name.replace(/^v/, "");
   const asset = (name: string) => rel.assets?.find((a) => a.name === name)?.browser_download_url ?? null;
   return {
@@ -122,7 +147,10 @@ export async function installStandalone(info: UpdateInfo, target = process.execP
 
 export function installHomebrew(): void {
   const brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].find((p) => Bun.file(p).size > 0) ?? "brew";
-  const r = Bun.spawnSync([brew, "upgrade", "autopilot"], { stdout: "pipe", stderr: "pipe", env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: "" } });
+  // Homebrew refreshes taps at most daily on its own; force it, or a just-published release looks absent.
+  const r = Bun.spawnSync([brew, "upgrade", "autopilot"], {
+    stdout: "pipe", stderr: "pipe", env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: "", HOMEBREW_AUTO_UPDATE_SECS: "0" },
+  });
   if (r.exitCode !== 0) throw new Error(`brew upgrade failed: ${`${r.stderr}`.trim().slice(-500)}`);
 }
 

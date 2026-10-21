@@ -3,7 +3,7 @@
 A local macOS daemon that turns Linear or Jira tickets into Claude Code sessions, with you approving each one.
 
 It watches your tracker (Linear, or Jira Cloud) for tickets assigned to you in **Ready for Development**. For each one it picks
-the repo in your code folder (`reposRoot`), plus any other repos the ticket also changes. It proposes a branch,
+the repo among the ones you picked (parent folders and/or individual repos), plus any other repos the ticket also changes. It proposes a branch,
 writes a short explainer, then asks you to approve or reject it on a local web page. When you
 approve, Supacode creates a worktree on that branch in every repo involved (its own branch creation
 and hooks run). A Claude Code session opens in the primary repo with the other worktrees added, so
@@ -22,14 +22,25 @@ Linear or Jira (MCP, OAuth) ──▶ newly eligible ticket ──▶ triage: re
 ```sh
 brew install mrinalraj/tap/autopilot
 brew services start autopilot   # runs at login, restarts on crash
-open http://localhost:4747      # pick Linear or Jira and sign in
+open http://localhost:4747      # first-run setup
 ```
 
-The first page asks which tracker your tickets live in and signs you in through the tracker's own
-page; `autopilot login` does the same from the terminal. Upgrading from `linear-autopilot` keeps
+The first visit walks through setup, and nothing is checked until it's done:
+
+1. **Repos:** parent folders (every git repo directly inside) and/or individual repos. Folders in
+   your home that hold repos are suggested, and **Choose in Finder** opens the macOS folder picker.
+2. **GitHub:** the `gh` account that can see your work repos. `gh` is required for tracking commits
+   and PRs; if it's missing or signed out, a button opens Terminal with `brew install gh` /
+   `gh auth login`.
+3. **Tracker:** Linear or Jira Cloud, signed in through the tracker's own page.
+4. **Statuses:** which statuses mean "pick this up", and which count as work already under way.
+5. **How it works:** a short overview, then **Start Autopilot**.
+
+Settings → Maintenance → **Run setup again** goes through it again; `autopilot login` signs in from
+the terminal. Upgrading from `linear-autopilot` keeps
 your data, settings and sign-in: they move to the new name on first start.
 
-The formula pulls in `terminal-notifier` and `gh` (recommended). `launchd` and `osascript` are part
+The formula pulls in `terminal-notifier` and `gh`. `launchd` and `osascript` are part
 of macOS. Under `brew services`, logs go to `$(brew --prefix)/var/log/autopilot.log`.
 
 To install your own build instead, run `scripts/brew-install-local.sh` (builds, then installs from
@@ -159,7 +170,7 @@ backend needs a restart.
 | Linear | Statuses that trigger pickup, and statuses to show without triage (picked from your teams' real statuses); the worktree scan on/off; **ticket prefixes** to recognise in branch names (default: your Linear teams' keys) |
 | Polling | How often to check Linear, and how often to check commits and PRs |
 | Launch | Launcher, terminal, worktree folder, base branch, fetch before creating, open in the background, move the ticket to In Progress |
-| Repos | Either **every repo in a parent folder** or **a list of specific repo paths** (they can live anywhere); per repo, include or exclude it and its description |
+| Repos | **Parent folders** (every repo directly inside) and/or **individual repos** (anywhere), combined; **Choose in Finder** adds more; per repo, include or exclude it and its description |
 | Triage | LLM backend and model; the low-confidence threshold |
 | GitHub | The `gh` account used for PR tracking |
 | Maintenance | Poll now, Reset tickets (triages again straight away), re-run setup checks, show dismissed tips, check for updates, restart, and where config, data and logs live |
@@ -170,7 +181,7 @@ backend needs a restart.
 | --- | --- | --- |
 | Supacode (default) | `supacode repo worktree-new` (Supacode's hooks run) | a Supacode tab |
 | Worktrunk | `wt switch --create` (Worktrunk's hooks run) | a new terminal tab |
-| git | `git worktree add` into `<code folder>/wt/<repo>/<branch>` | a new terminal tab |
+| git | `git worktree add` into `<first repo folder>/wt/<repo>/<branch>` | a new terminal tab |
 | VS Code / Cursor | git, as above; opens a new editor window with the ticket's worktrees | the editor's **chat panel** (default) or a new terminal tab |
 
 **Chat panel (VS Code, Cursor):**
@@ -283,7 +294,7 @@ makes two `claude -p` calls with JSON-schema output:
   for reference aren't listed), and one branch name used in every repo.
 - **explain:** summary, approach, likely areas and size (S/M/L).
 
-The repo must exist in the catalog: the git repos under `reposRoot`, each with a description from
+The repo must exist in the catalog: the git repos in your parent folders plus the individual ones, each with a description from
 `config.json` or derived from its README. The branch must match `<2–5 word slug>-<identifier>`, for
 example `fix-chart-zero-division-eng-2203`. An invalid branch name is repaired deterministically.
 
@@ -327,7 +338,9 @@ project directory, and `~` is expanded.
 | `pickupStates` | `["Ready for Development"]` | Linear status names (case-insensitive) that make an assigned ticket eligible. `[]` = any open state. |
 | `port` | `4747` (`4800` from source) | Web page; binds to `127.0.0.1` only. |
 | `oauthCallbackPort` | `4748` | Loopback redirect used by `bun run login`. |
-| `reposRoot` | `~/code` | Every git repo directly under it is a launch target. |
+| `repoRoots` | `[]` | Parent folders; every git repo directly inside each is a launch target. Older configs' `reposRoot` / `repoMode` migrate to this. |
+| `repoPaths` | `[]` | Individual repos, anywhere; combined with `repoRoots`. |
+| `onboarded` | `false` on a new install | Set by first-run setup; nothing is polled before. Configs from before setup existed count as done. |
 | `stateDir` / `briefsDir` | `./state` / `./state/briefs` | `./state/jira` for Jira. |
 | `githubUser` | `""` | GitHub account used for PR tracking. Empty means `gh`'s active account. Set it if you keep several `gh` logins, so switching accounts doesn't break tracking. When the account changes (here, or gh's active one when this is empty), the next check re-reads every ticket's PRs, completed ones included. |
 | `linearUserId` | `""` | Empty = the logged-in Linear user. |

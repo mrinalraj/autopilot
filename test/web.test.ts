@@ -28,7 +28,7 @@ beforeAll(() => {
   process.env.AUTOPILOT_NOTIFY = "off";
   mkdirSync(join(dir, "repos", "backend"), { recursive: true });
   Bun.spawnSync(["git", "init", "-q", join(dir, "repos", "backend")]);
-  const cfg = { ...loadConfig("/nonexistent"), port, reposRoot: join(dir, "repos"), stateDir: join(dir, "state"), briefsDir: join(dir, "b") };
+  const cfg = { ...loadConfig("/nonexistent"), onboarded: true, port, repoRoots: [join(dir, "repos")], stateDir: join(dir, "state"), briefsDir: join(dir, "b") };
   store = new Store(cfg.stateDir);
   store.upsertIssue({
     linear_id: "x", identifier: "ENG-9", title: `<script>alert(1)</script>`, url: "https://linear.app/i/ENG-9",
@@ -191,7 +191,7 @@ test("reject via the form, as a browser sends it", async () => {
 
 test("first run: no sign-in and no tickets shows the connect card instead of an error", async () => {
   const s = new Store(join(dir, "fresh"));
-  const cfg = { ...loadConfig("/nonexistent"), port: port + 1, stateDir: join(dir, "fresh"), briefsDir: join(dir, "fresh", "b") };
+  const cfg = { ...loadConfig("/nonexistent"), onboarded: true, port: port + 1, stateDir: join(dir, "fresh"), briefsDir: join(dir, "fresh", "b") };
   const ap = new Autopilot(cfg, s, { kind: "linear", label: "Linear" } as Tracker, {} as LLM);
   ap.lastPollError = "Linear login required: sign in from Settings";
   const srv = startWeb(ap, { health: { items: [], refresh: async () => [] } as never });

@@ -265,6 +265,27 @@ export class Autopilot {
 
     const supacodePaths = await supacodeWorktreePaths(this.cfg);
     const imported: string[] = [];
+    // Awaiting approval (or failed) here, but already started elsewhere: track the existing worktrees instead.
+    for (const [identifier, wts] of found) {
+      const row = this.store.getIssueByIdentifier(identifier);
+      if (!row || !["pending", "failed"].includes(row.status)) continue;
+      const [primary, ...others] = wts;
+      this.store.updateIssue(row.linear_id, {
+        status: "running",
+        error: null,
+        repo: primary.repo,
+        repo_path: primary.repoPath,
+        branch: primary.branch,
+        worktree_id: supacodeId(primary.path),
+        extra_repos_json: JSON.stringify(others.map((w): ExtraRepo => ({ repo: w.repo, repo_path: w.repoPath, reason: "", worktree_id: supacodeId(w.path) }))),
+        launcher: supacodePaths.has(primary.path) ? "supacode" : "git",
+      });
+      this.store.markHandled(row.linear_id);
+      writeBrief(this.store.getIssue(row.linear_id)!);
+      log.info(`${identifier} already has a worktree (${primary.branch}); moved to In progress instead of awaiting approval`);
+      imported.push(identifier);
+      await this.refreshWork(row.linear_id);
+    }
     for (const identifier of wanted) {
       if (this.store.getIssueByIdentifier(identifier)) continue;
       const issue = await this.tracker.issue(identifier);
@@ -313,6 +334,11 @@ export class Autopilot {
     return Array.isArray(w) ? w : [{ repo: row.repo, ...w }];
   }
 
+  /** A poll, unless first-run setup isn't finished (nothing is checked or triaged before that). */
+  pollIfReady(): Promise<void> {
+    return this.cfg.onboarded ? this.poll() : Promise.resolve();
+  }
+
   /** One poll cycle: detect newly eligible tickets, then triage anything not yet handled. */
   async poll(): Promise<void> {
     if (this.polling) return;
@@ -322,11 +348,12 @@ export class Autopilot {
       log.info(`Checking ${this.trackerLabel} for tickets…`);
       await this.detectAssignments();
       const queued = this.store.unhandled().length;
-      await this.processQueue();
+      // Import first: a ticket that already has a worktree is work under way, not one to triage.
       const imported = await this.importExisting().catch((err) => {
         log.warn("import of existing work failed", err);
         return [] as string[];
       });
+      await this.processQueue();
       log.info(`${this.trackerLabel} check done in ${((Date.now() - started) / 1000).toFixed(1)}s: ${queued} to triage, ${imported.length} imported`);
       this.lastPollError = null;
     } catch (err) {
@@ -426,7 +453,7 @@ export class Autopilot {
 
   private async triage(issue: TrackerIssue) {
     const catalog = this.catalog();
-    if (catalog.length === 0) throw new Error(`no git repos found under ${this.cfg.reposRoot}`);
+    if (catalog.length === 0) throw new Error("no git repos found in the folders in Settings → Repos");
 
     const resolution = await resolveRepo(this.llm, issue, catalog);
     const repo = catalog.find((r) => r.name === resolution.repo)!;
@@ -673,7 +700,7 @@ export class Autopilot {
       .then(async (me) => {
         log.info(`Signed in to ${this.trackerLabel} as ${me.name}${me.email ? ` <${me.email}>` : ""}`);
         await this.afterAuthChange();
-        void this.poll();
+        void this.pollIfReady();
       })
       .catch((err) => log.warn(`${this.trackerLabel} sign-in didn't complete`, err))
       .finally(() => (this.signingIn = false));

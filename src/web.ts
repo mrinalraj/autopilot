@@ -3,8 +3,8 @@ import { esc, page } from "./html";
 import { eventsSince } from "./log";
 import { mkdirSync } from "node:fs";
 import { launchSteps } from "./steps";
-import { launcherFor, pathFromId } from "./launch";
-import { loadConfig, LOG_PATH } from "./config";
+import { launcherFor, pathFromId, runInTerminal } from "./launch";
+import { CONFIG_PATH, loadConfig, LOG_PATH } from "./config";
 import { ICONS, MANIFEST, offlinePage, SERVICE_WORKER } from "./pwa";
 import { Autopilot, phaseOf } from "./autopilot";
 import type { IssueRow, IssueStatus } from "./db";
@@ -13,7 +13,9 @@ import { Store } from "./db";
 import { atRisk, isSettled, overallStage, stage, type RepoWork, type WorkStage } from "./work";
 import type { Updater } from "./updater";
 import type { Health, SetupItem } from "./health";
-import { githubAccounts, resetSettingsFile, saveSettings, saveTracker } from "./settings";
+import { addPicked, checkRepos, githubAccounts, githubStatus, patchConfig, type GithubStatus, resetSettingsFile, saveSettings, saveTracker, writeRepos, writeStatuses } from "./settings";
+import { chooseFolders, doneSteps, isStep, setupBody, STEPS, suggestFolders } from "./onboarding";
+import { repoSources } from "./catalog";
 import { openTracker } from "./connect";
 import { settingsBody } from "./settings-page";
 import { managedByLaunchd } from "./update";
@@ -86,8 +88,11 @@ function workSummary(list: RepoWork[] | null): string {
 const repoPills = (r: IssueRow) =>
   `<span class="pill">${esc(r.repo)}</span>${Store.extras(r).map((e) => `<span class="pill extra" title="${esc(e.reason)}">+ ${esc(e.repo)}</span>`).join("")}`;
 
-export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: Health; reschedule?: () => void } = {}) {
+export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: Health; reschedule?: () => void; configPath?: string; gh?: () => GithubStatus } = {}) {
   const { updater, health, reschedule } = extras;
+  /** Every settings write goes here (tests point it at a temp file). */
+  const configPath = extras.configPath ?? CONFIG_PATH;
+  const gh = extras.gh ?? githubStatus;
   const port = ap.cfg.port;
   // Kept in the database so pages stay valid across restarts and updates (per install, never sent elsewhere).
   const csrf = ap.store.getMeta("csrf_token") ?? randomBytes(24).toString("hex");
@@ -101,6 +106,8 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
     typeof t === "string" && t.length === csrf.length && timingSafeEqual(Buffer.from(t), Buffer.from(csrf));
 
   const redirect = (to: string) => new Response(null, { status: 303, headers: { Location: to } });
+  /** Redirect with an ?error= or ?notice= banner, onto a URL that may already have a query. */
+  const go = (to: string, kind: "error" | "notice", msg: string) => redirect(`${to}${to.includes("?") ? "&" : "?"}${kind}=${encodeURIComponent(msg)}`);
 
   const actionBase = (r: IssueRow) => `/issues/${encodeURIComponent(r.identifier)}`;
   const isLow = (r: IssueRow) => r.confidence < ap.cfg.lowConfidenceThreshold;
@@ -471,7 +478,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
         }
 
         if (path === "/poll") {
-          void ap.poll().then(() => ap.refreshWork());
+          void ap.pollIfReady().then(() => ap.refreshWork());
           void health?.refresh();
           return redirect("/");
         }
@@ -486,7 +493,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
         }
         if (path === "/settings") {
           const githubBefore = ap.cfg.githubUser;
-          const res = saveSettings(ap.cfg, form);
+          const res = saveSettings(ap.cfg, form, configPath);
           if (res.errors.length) return redirect(`/settings?error=${encodeURIComponent(res.errors.join(" "))}`);
           if (ap.cfg.githubUser !== githubBefore) {
             void ap.refreshWork(); // notices the new account and re-checks every ticket
@@ -499,7 +506,7 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
         if (path === "/actions/reset") {
           try {
             const r = await resetTickets();
-            void ap.poll(); // triage the re-queued tickets right away
+            void ap.pollIfReady(); // triage the re-queued tickets right away
             return redirect(`/?notice=${encodeURIComponent(`Reset: cleared ${r.cleared.length}, kept ${r.kept.length} launched, triaging ${r.queued.length}.`)}`);
           } catch (err) {
             return redirect(`/settings?error=${encodeURIComponent(`Reset failed: ${(err as Error).message}`)}`);
@@ -509,15 +516,16 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
           if (form.get("confirm") !== "on") return redirect(`/settings?error=${encodeURIComponent('Tick "Yes, erase everything" to confirm.')}`);
           const resetSettings = form.get("resetSettings") === "on";
           const res = await ap.eraseAll(resetSettings ? () => {
-            resetSettingsFile();
-            Object.assign(ap.cfg, loadConfig());
+            resetSettingsFile(configPath);
+            Object.assign(ap.cfg, loadConfig(configPath));
           } : undefined);
           if (!res.ok) return redirect(`/settings?error=${encodeURIComponent(`Not erased: ${res.error}`)}`);
           ap.store.restoreBanners();
           reschedule?.();
           void health?.refresh();
-          void ap.poll();
-          return redirect(`/?notice=${encodeURIComponent(`Erased all data${resetSettings ? " and reset settings" : ""}; still signed in. Checking ${ap.trackerLabel} for your tickets now.`)}`);
+          if (!ap.cfg.onboarded) return go("/setup", "notice", "Erased all data and reset settings; you're still signed in. Set things up again:");
+          void ap.pollIfReady();
+          return go("/", "notice", `Erased all data; still signed in. Checking ${ap.trackerLabel} for your tickets now.`);
         }
         if (path === "/actions/signin") {
           const res = ap.startSignIn();
@@ -532,24 +540,81 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
           return redirect(`/settings?notice=${encodeURIComponent(`Signed out of ${ap.trackerLabel}.`)}`);
         }
         if (path === "/actions/switch-tracker") {
-          // Also the first-run "Connect" buttons, which add signin=1.
-          const res = saveTracker(form);
-          if (!res.ok) return redirect(`/settings?error=${encodeURIComponent(res.error)}`);
-          const back = form.get("from") === "home" ? "/" : "/settings";
+          // Also the "Connect" buttons on the home page and in setup, which add signin=1.
+          const from = String(form.get("from") ?? "");
+          const back = from === "home" ? "/" : from === "setup" ? "/setup?step=tracker" : "/settings";
+          const res = saveTracker(form, configPath);
+          if (!res.ok) return go(back, "error", res.error);
           const site = form.has("jiraSite") ? String(form.get("jiraSite")).trim() : ap.cfg.jira.site;
           if (res.tracker !== ap.cfg.tracker || site !== ap.cfg.jira.site) {
-            Object.assign(ap.cfg, loadConfig());
+            Object.assign(ap.cfg, loadConfig(configPath));
             const sw = await ap.switchTracker(() => openTracker(ap.cfg).tracker);
-            if (!sw.ok) return redirect(`${back}?error=${encodeURIComponent(sw.error)}`);
+            if (!sw.ok) return go(back, "error", sw.error);
             health?.refresh().catch(() => {});
           }
           if (form.get("signin")) {
             const si = ap.startSignIn();
-            if (!si.ok) return redirect(`${back}?error=${encodeURIComponent(si.error)}`);
-            return redirect(`${back}?notice=${encodeURIComponent(`${ap.trackerLabel} opened in your browser: approve access there, and this page updates once you're signed in.`)}`);
+            if (!si.ok) return go(back, "error", si.error);
+            return go(back, "notice", `${ap.trackerLabel} opened in your browser: approve access there, and this page updates once you're signed in.`);
           }
-          void ap.poll();
-          return redirect(`${back}?notice=${encodeURIComponent(`Now using ${ap.trackerLabel}.`)}`);
+          void ap.pollIfReady();
+          return go(back, "notice", `Now using ${ap.trackerLabel}.`);
+        }
+        if (path === "/actions/pick-folders") {
+          const back = form.get("from") === "setup" ? "/setup?step=repos" : "/settings";
+          try {
+            const picked = await chooseFolders();
+            if (!picked?.length) return redirect(back);
+            const errors = addPicked(ap.cfg, picked, configPath);
+            if (errors.length) return go(back, "error", errors.join(" "));
+            void health?.refresh();
+            return go(back, "notice", `Added ${picked.map((p) => p.replace(/\/$/, "").split("/").pop()).join(", ")}.`);
+          } catch (err) {
+            return go(back, "error", `Couldn't open the folder picker (${(err as Error).message}); type the paths instead.`);
+          }
+        }
+        if (path === "/actions/setup-again") {
+          patchConfig(ap.cfg, (raw) => (raw.onboarded = false), configPath);
+          return redirect("/setup");
+        }
+        if (path === "/setup/repos") {
+          const lines = (name: string) => String(form.get(name) ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+          const roots = [...new Set([...form.getAll("root").map(String), ...lines("moreRoots")])];
+          const paths = lines("repoPaths");
+          const errors = checkRepos(roots, paths);
+          if (errors.length) return go("/setup?step=repos", "error", errors.join(" "));
+          patchConfig(ap.cfg, (raw) => writeRepos(raw, roots, paths), configPath);
+          void health?.refresh();
+          return redirect("/setup?step=github");
+        }
+        if (path === "/setup/gh-terminal") {
+          const cmd = form.get("cmd") === "install" ? "brew install gh && gh auth login" : "gh auth login";
+          try {
+            await runInTerminal(ap.cfg, cmd);
+          } catch (err) {
+            return go("/setup?step=github", "error", `Couldn't open a terminal (${(err as Error).message}). Run \`${cmd}\` yourself, then click Check again.`);
+          }
+          return go("/setup?step=github", "notice", "Finish in the Terminal window that just opened, then click Check again.");
+        }
+        if (path === "/setup/github") {
+          const user = String(form.get("githubUser") ?? "");
+          if (!gh().accounts.some((a) => a.name === user)) return go("/setup?step=github", "error", "Pick one of your gh accounts.");
+          const changed = user !== ap.cfg.githubUser;
+          patchConfig(ap.cfg, (raw) => (raw.githubUser = user), configPath);
+          if (changed && ap.cfg.onboarded) void ap.refreshWork();
+          return redirect("/setup?step=tracker");
+        }
+        if (path === "/setup/statuses") {
+          patchConfig(ap.cfg, (raw) => writeStatuses(raw, ap.cfg, form), configPath);
+          return redirect("/setup?step=start");
+        }
+        if (path === "/setup/finish") {
+          patchConfig(ap.cfg, (raw) => (raw.onboarded = true), configPath);
+          log.info("setup finished; polling starts");
+          reschedule?.();
+          void health?.refresh();
+          void ap.pollIfReady().then(() => ap.refreshWork());
+          return go("/", "notice", `Autopilot is running: checking ${ap.trackerLabel} for your tickets now.`);
         }
         if (path === "/actions/trust-folder") {
           // Opening the folder makes the editor ask "Do you trust the authors?"; the choice stays with the user.
@@ -661,7 +726,26 @@ export function startWeb(ap: Autopilot, extras: { updater?: Updater; health?: He
           }),
         );
       }
+      if (path === "/" && !ap.cfg.onboarded) return redirect("/setup");
       if (path === "/") return indexPage(url.searchParams.get("error") ?? undefined, url.searchParams.get("notice") ?? undefined);
+      if (path === "/setup") {
+        const ghNow = gh();
+        const repos = repoSources(ap.cfg);
+        const account = await ap.account().catch(() => null);
+        const asked = url.searchParams.get("step");
+        const done = doneSteps({ cfg: ap.cfg, repos, gh: ghNow, account });
+        const step = isStep(asked) ? asked : STEPS.find((s) => !done.has(s.id))?.id ?? "start";
+        return page(
+          "Set up · Autopilot",
+          setupBody({
+            cfg: ap.cfg, step, tokenField, trackerLabel: ap.trackerLabel, account, signingIn: ap.signingIn, gh: ghNow, repos,
+            suggestions: step === "repos" ? suggestFolders() : [],
+            statuses: step === "statuses" && account ? await ap.statusOptions() : [],
+            error: url.searchParams.get("error") ?? undefined,
+            notice: url.searchParams.get("notice") ?? undefined,
+          }),
+        );
+      }
       // Old links: open the item's modal on the list page.
       const m = path.match(/^\/issues\/([^/]+)$/);
       if (m) return redirect(`/#${modalId(decodeURIComponent(m[1]))}`);
