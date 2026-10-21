@@ -1,6 +1,6 @@
 import { version } from "../package.json";
-import { baseUrl, CONFIG_PATH, HOME_DIR, loadConfig, LOG_PATH } from "./config";
-import { preparePath } from "./env";
+import { baseUrl, CONFIG_PATH, HOME_DIR, loadConfig, LOG_PATH } from "./config/config";
+import { preparePath } from "./platform/env";
 
 const HELP = `autopilot ${version}
 Triage Linear tickets assigned to you and launch Claude Code sessions for the ones you approve.
@@ -28,19 +28,19 @@ const flags = new Set([sub, ...rest].filter(Boolean));
 try {
   switch (cmd) {
     case "start":
-      await (await import("./daemon")).runDaemon();
+      await (await import("./app/daemon")).runDaemon();
       break;
     case "once":
-      await (await import("./daemon")).runDaemon({ once: true });
+      await (await import("./app/daemon")).runDaemon({ once: true });
       break;
     case "login":
-      await (await import("./login")).login({ force: flags.has("--force") });
+      await (await import("./app/login")).login({ force: flags.has("--force") });
       break;
     case "reset":
-      await (await import("./reset")).reset();
+      await (await import("./app/reset")).reset();
       break;
     case "update": {
-      const u = await import("./update");
+      const u = await import("./updates/update");
       const info = await u.checkForUpdate();
       if (!info) console.log(`No releases published yet (${version}).`);
       else if (!info.available) console.log(`Up to date (${info.current}).`);
@@ -55,7 +55,7 @@ try {
       Bun.spawnSync(["open", baseUrl(loadConfig())]);
       break;
     case "service": {
-      const s = await import("./service");
+      const s = await import("./platform/service");
       if (sub === "install") s.installService();
       else if (sub === "uninstall") s.uninstallService();
       else if (sub === "restart") s.restartService();
