@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs";
-import { loadConfig } from "./config";
+import { baseUrl, loadConfig } from "./config";
+import { repoSources } from "./catalog";
 import { Store } from "./db";
 import { openTracker } from "./connect";
 import { createLLM } from "./llm";
@@ -30,7 +31,7 @@ export async function runDaemon(opts: { once?: boolean } = {}) {
   function reschedule() {
     timers.forEach(clearInterval);
     timers = [
-      setInterval(() => void ap.poll(), cfg.pollIntervalSeconds * 1000),
+      setInterval(() => void ap.pollIfReady(), cfg.pollIntervalSeconds * 1000),
       setInterval(() => void ap.refreshWork(), cfg.workCheckIntervalSeconds * 1000),
     ];
   }
@@ -48,9 +49,10 @@ export async function runDaemon(opts: { once?: boolean } = {}) {
     }
     throw err;
   }
-  log.info(`polling ${tracker.label} every ${cfg.pollIntervalSeconds}s; repos under ${cfg.reposRoot}; llm ${cfg.llm.provider}/${cfg.llm.model}`);
+  log.info(`polling ${tracker.label} every ${cfg.pollIntervalSeconds}s; ${repoSources(cfg).length} repos; llm ${cfg.llm.provider}/${cfg.llm.model}`);
   reschedule();
-  await ap.poll();
+  if (!cfg.onboarded) log.info(`first run: finish setup at ${baseUrl(cfg)}/setup; nothing is checked until then`);
+  await ap.pollIfReady();
   void ap.refreshWork();
   updater.start();
 

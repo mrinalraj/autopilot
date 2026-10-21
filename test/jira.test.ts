@@ -151,7 +151,7 @@ function describeAutopilot() {
     process.env.AUTOPILOT_NOTIFY = "off";
     mkdirSync(join(dir, "repos", "backend"), { recursive: true });
     Bun.spawnSync(["git", "init", "-q", join(dir, "repos", "backend")]);
-    const cfg = { ...loadConfig("/nonexistent"), tracker: "jira" as const, reposRoot: join(dir, "repos"), stateDir: join(dir, "state"), briefsDir: join(dir, "state", "briefs") };
+    const cfg = { ...loadConfig("/nonexistent"), tracker: "jira" as const, repoRoots: [join(dir, "repos")], stateDir: join(dir, "state"), briefsDir: join(dir, "state", "briefs") };
     cfg.importWorktrees = false;
     cfg.importStates = ["In Development"]; // not a status on this site: must not break the poll
     store = new Store(cfg.stateDir);

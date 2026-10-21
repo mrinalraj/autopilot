@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Config } from "./config";
 
 export interface RepoEntry {
@@ -38,37 +38,43 @@ function topLevel(repoPath: string): string[] {
     .slice(0, 40);
 }
 
-function discover(reposRoot: string): string[] {
-  return readdirSync(reposRoot)
+/** Git repos directly inside `root`. */
+export function discover(root: string): string[] {
+  let names: string[];
+  try {
+    names = readdirSync(root);
+  } catch {
+    return [];
+  }
+  return names
     .filter((n) => !n.startsWith("."))
     .filter((n) => {
-      const p = join(reposRoot, n);
-      return statSync(p).isDirectory() && existsSync(join(p, ".git"));
+      const p = join(root, n);
+      try {
+        return statSync(p).isDirectory() && existsSync(join(p, ".git"));
+      } catch {
+        return false;
+      }
     })
     .sort();
 }
 
 /**
- * Repo catalog for every git repo directly under `reposRoot`. Derived descriptions are
- * cached in the state dir on first sight; `config.repos[name].description` always wins.
+ * The repos in play: every git repo directly inside the parent folders, plus the individual ones.
+ * Named by folder; two with the same folder name get their parent's name prepended. Derived
+ * descriptions are cached in the state dir; `config.repos[name].description` always wins.
  */
-/** Every git repo under reposRoot, excluded ones included, with derived and overridden descriptions. */
-/** The repos in play: discovered in the parent folder, or the explicit list (named by folder). */
 export function repoSources(cfg: Config): { name: string; path: string }[] {
-  if (cfg.repoMode === "list") {
-    const seen = new Map<string, number>();
-    return cfg.repoPaths
-      .filter((p) => existsSync(join(p, ".git")))
-      .map((path) => {
-        const base = basename(path);
-        const n = (seen.get(base) ?? 0) + 1;
-        seen.set(base, n);
-        // Two repos with the same folder name get the parent's name prepended to stay distinct.
-        return { name: n === 1 ? base : `${basename(dirname(path))}-${base}`, path };
-      });
-  }
-  if (!existsSync(cfg.reposRoot)) return [];
-  return discover(cfg.reposRoot).map((name) => ({ name, path: join(cfg.reposRoot, name) }));
+  const paths: string[] = [];
+  for (const root of cfg.repoRoots) if (existsSync(root)) for (const n of discover(root)) paths.push(join(root, n));
+  for (const p of cfg.repoPaths) if (existsSync(join(p, ".git"))) paths.push(p);
+  const seen = new Map<string, number>();
+  return [...new Set(paths.map((p) => resolve(p)))].map((path) => {
+    const base = basename(path);
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return { name: n === 1 ? base : `${basename(dirname(path))}-${base}`, path };
+  });
 }
 
 export function listRepos(cfg: Config): { name: string; path: string; derived: string; override: string; excluded: boolean }[] {

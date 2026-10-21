@@ -36,7 +36,7 @@ class Autopilot < Formula
 
   depends_on :macos
   depends_on "terminal-notifier"
-  depends_on "gh" => :recommended
+  depends_on "gh"
 
   def install
     bin.install "autopilot"

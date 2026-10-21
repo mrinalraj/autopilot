@@ -25,7 +25,7 @@ const checked = (on: boolean) => (on ? " checked" : "");
 const selected = (on: boolean) => (on ? " selected" : "");
 
 /** Checkbox list of the tracker's statuses (deduplicated across teams) plus a free-text box for others. */
-function statusPicker(name: string, current: string[], statuses: SettingsData["statuses"], hint: string, tracker: string): string {
+export function statusPicker(name: string, current: string[], statuses: SettingsData["statuses"], hint: string, tracker: string): string {
   const names = [...new Map(statuses.map((s) => [s.name.toLowerCase(), s])).values()];
   const known = new Set(names.map((s) => s.name.toLowerCase()));
   const other = current.filter((c) => !known.has(c.toLowerCase()));
@@ -130,11 +130,11 @@ export function settingsBody(d: SettingsData): string {
       </section>
 
       <section class="box"><h3>Repos</h3>
-        <label class="check"><input type="radio" name="repoMode" value="folder"${checked(cfg.repoMode === "folder")}> Every repo in a parent folder</label>
-        <input type="text" id="reposRoot" name="reposRoot" value="${esc(cfg.reposRoot)}" aria-label="Parent folder">
-        <label class="check" style="margin-top:12px"><input type="radio" name="repoMode" value="list"${checked(cfg.repoMode === "list")}> These repos only (one path per line; they can live anywhere)</label>
-        <textarea name="repoPaths" rows="4" placeholder="~/code/api&#10;~/work/web" aria-label="Repo paths">${esc(cfg.repoPaths.join("\n"))}</textarea>
-        <div class="muted small" style="margin-top:4px">Descriptions below help triage pick the right repo; save after switching to refresh the list.</div>
+        <label for="repoRoots">Parent folders: every git repo directly inside is included (one per line)</label>
+        <textarea id="repoRoots" name="repoRoots" rows="2" placeholder="~/code">${esc(cfg.repoRoots.join("\n"))}</textarea>
+        <label for="repoPaths">Individual repos, wherever they live (one per line)</label>
+        <textarea id="repoPaths" name="repoPaths" rows="2" placeholder="~/work/web">${esc(cfg.repoPaths.join("\n"))}</textarea>
+        <div class="muted small" style="margin-top:4px">Add more with <strong>Choose in Finder</strong> under Maintenance. Descriptions below help triage pick the right repo; save after changing folders to refresh the list.</div>
         <div class="repos">${repos.length ? repos.map((r) => `<div class="repo">
             <input type="hidden" name="present:${esc(r.name)}" value="1">
             <label class="check" style="margin:0"><input type="checkbox" name="include:${esc(r.name)}"${checked(!r.excluded)}> <strong>${esc(r.name)}</strong></label>
@@ -173,6 +173,8 @@ export function settingsBody(d: SettingsData): string {
           <label class="check" style="margin:6px 0 0"><input type="checkbox" name="resetSettings"> Also reset settings to defaults</label>
           <label class="check" style="margin:4px 0 0"><input type="checkbox" name="confirm" required> Yes, erase everything</label></span>
       </form>
+      <div class="actrow">${action("/actions/pick-folders", "Choose in Finder…", "Waiting for Finder…")}<span class="muted small">Add parent folders or repos with the macOS folder picker (saved right away).</span></div>
+      <div class="actrow">${action("/actions/setup-again", "Run setup again", "Opening…")}<span class="muted small">Walk through the first-run steps again (repos, GitHub, tracker, statuses). Tickets are kept.</span></div>
       <div class="actrow">${action("/actions/recheck", "Re-run setup checks", "Checking…")}<span class="muted small">Refresh the setup tips on the home screen.</span></div>
       <div class="actrow">${action("/banners/restore", `Show dismissed tips${d.dismissedTips ? ` (${d.dismissedTips})` : ""}`, "Showing…")}<span class="muted small">Bring back setup tips you dismissed.</span></div>
       <div class="actrow">${action("/actions/check-updates", "Check for updates", "Checking…")}<span class="muted small">Version ${esc(d.version)}.</span></div>

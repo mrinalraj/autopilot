@@ -156,6 +156,18 @@ details.danger ul { margin:8px 0; }
 .actrow { display:flex; gap:12px; align-items:center; padding:8px 0; border-top:1px solid var(--border); }
 .actrow:first-of-type { border-top:0; }
 .actrow form { margin:0; flex:none; } .actrow form button { min-width:170px; justify-content:center; }
+.steps { display:flex; flex-wrap:wrap; gap:6px; list-style:none; padding:0; margin:16px 0; }
+.steps li a { display:block; padding:6px 12px; border-radius:999px; border:1px solid var(--border); color:var(--muted); text-decoration:none; font-size:13px; }
+.steps li.done a { color:var(--text); }
+.steps li.current a { background:var(--accent); border-color:transparent; color:#fff; }
+.setup h2 { margin:0 0 6px; } .setup label { display:block; margin-top:14px; }
+.opts.col { display:flex; flex-direction:column; gap:6px; }
+.opt.wide { display:flex; gap:10px; align-items:flex-start; margin:0; padding:8px 10px; border:1px solid var(--border); border-radius:10px; }
+.setup-actions { margin-top:18px; }
+.connect-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-top:12px; }
+.connect-grid > div { border:1px solid var(--border); border-radius:12px; padding:12px 14px; }
+.connect-grid h3 { margin:0 0 8px; } .connect-option input[type=text] { margin-bottom:8px; }
+.how { padding-left:20px; line-height:1.6; } .how li { margin:6px 0; }
 .actrow.erase { align-items:flex-start; } .actrow.erase > button { min-width:170px; justify-content:center; flex:none; }
 .gear { font-size:18px; padding:6px 10px; }
 

@@ -83,7 +83,7 @@ beforeAll(() => {
     Bun.spawnSync(["git", "init", "-q", join(reposRoot, name)]);
   }
   process.env.FAKE_SC_REPOS = supacodeId(join(reposRoot, "backend"));
-  cfg = { ...loadConfig("/nonexistent"), reposRoot, stateDir: join(dir, "state"), briefsDir: join(dir, "state", "briefs") };
+  cfg = { ...loadConfig("/nonexistent"), repoRoots: [reposRoot], stateDir: join(dir, "state"), briefsDir: join(dir, "state", "briefs") };
   cfg.launch = { ...cfg.launch, supacodeBin: join(import.meta.dir, "fake-supacode.sh"), fetch: false };
   // Importing existing work has its own test; keep it out of the pickup flow tested here.
   cfg.importStates = [];
