@@ -33,7 +33,7 @@ AUTOPILOT_HOME=$PWD/.dev/fresh bun src/cli.ts start   # a throwaway home: walks 
 - **Never `pkill -f "src/cli.ts start"`:** it also matches a real daemon started from source. Stop
   the specific process instead.
 
-Config, state and logs live under `HOME_DIR` (`config.ts`):
+Config, state and logs live under `HOME_DIR` (`src/config/config.ts`):
 - `AUTOPILOT_HOME` if set
 - otherwise `~/Library/Application Support/autopilot` in the compiled binary. A
   `linear-autopilot` folder there is renamed on first start.
@@ -43,23 +43,36 @@ Never derive paths from `import.meta.dir` elsewhere: inside the binary it's Bun'
 
 ## Architecture
 
+See [docs/architecture.md](docs/architecture.md) for dependency boundaries and edit recipes.
+Paths below are relative to `src/`.
+
 | Module | Role |
 | --- | --- |
-| `autopilot.ts` | Orchestrator: `poll` (`detectAssignments` → `importExisting` → `processQueue` → `triage`), `approve` / `reject`, `runLaunch`, `refreshWork`, `deleteWorktrees`, `sendBackToApproval`, `switchTracker`, `eraseAll`, sign-in/out |
-| `db.ts` | SQLite store (single source of truth) |
-| `tracker.ts` / `connect.ts` | `Tracker` interface, per-tracker specs (MCP URL, Keychain account, revoke URL, scope) / `openTracker(cfg)` |
-| `linear.ts` / `jira.ts` / `adf.ts` | Tracker clients over MCP / Atlassian rich text → Markdown |
-| `mcp.ts` / `login.ts` / `keychain.ts` | MCP session with reconnect + Keychain OAuth provider / browser sign-in and sign-out / Keychain access |
-| `triage.ts` / `llm.ts` / `branch.ts` / `brief.ts` | Prompts and validation / `claude -p` or Anthropic API / branch names / brief rendering |
-| `launch.ts` / `steps.ts` | Launchers, terminals, IDE chat, `runInTerminal` / per-ticket live step lines |
-| `work.ts` / `importer.ts` / `catalog.ts` | Commits + PRs per worktree / ticket IDs in worktree branches / repo catalog |
-| `web.ts` / `html.ts` / `settings-page.ts` / `onboarding.ts` / `pwa.ts` | Server-rendered pages, CSS + the one live script, Settings, `/setup`, PWA manifest/service worker/offline page |
-| `settings.ts` / `config.ts` | Config writes (`saveSettings`, `patchConfig`, `saveTracker`, `resetSettingsFile`, `addPicked`, `checkRepos`) / defaults, migration, paths |
-| `health.ts` / `notify.ts` / `update.ts` / `updater.ts` / `service.ts` / `reset.ts` | Setup banners / notifications / release checks and installs / LaunchAgent / CLI reset |
+| `app/autopilot.ts` / `app/daemon.ts` | Ticket workflows / composition and timers |
+| `app/login.ts` / `app/reset.ts` / `app/health.ts` / `app/steps.ts` | Login workflow / reset / setup checks / live launch progress |
+| `domain/` | Pure ticket/work rules and shared types; no I/O dependencies |
+| `storage/db.ts` | SQLite schema, migrations and queries (single source of truth) |
+| `trackers/` | Tracker interface/specs, clients, MCP session, Keychain OAuth provider |
+| `triage/` | LLM integration, prompts, branch validation, brief writes; pure rendering in `brief-template.ts` |
+| `repos/` | Catalog, worktree import and folder suggestions |
+| `workspaces/` | Launchers, terminals, IDE chat, commits and PR inspection |
+| `config/` | Defaults, migration, paths, settings validation and writes |
+| `platform/` | Environment, Keychain, notifications, LaunchAgent, GitHub and folder-picker adapters |
+| `updates/` / `shared/log.ts` | Release checks/installs and update state / logging |
+| `web/server.ts` / `web/routes/` | HTTP security/composition / page and action handlers |
+| `web/presenters/` / `web/models.ts` | Build display snapshots / view data contracts |
+| `web/views/` / `web/assets/` | Pure HTML templates / CSS and browser scripts |
+| `web/setup.ts` / `web/oauth-callback.ts` | Pure setup-step helpers / loopback OAuth HTTP adapter |
+| `web/pwa.ts` / `web/static.ts` / `web/http.ts` | Manifest and embedded assets / static routes / HTTP response helpers |
+
+Templates accept data, never `Autopilot`, `Store`, launchers or action callbacks. Backend services
+must not import the web layer; `app/` is allowed to compose it. Pure rules shared with views go
+in `domain/`, not in a service. `test/architecture.test.ts` checks these runtime boundaries.
+Type-only imports for data contracts are permitted.
 
 ### Data
 
-SQLite (`db.ts`) is the single source of truth.
+SQLite (`src/storage/db.ts`) is the single source of truth.
 
 - **`issues`:** one row per ticket. Status is `pending | approved | rejected | running | failed`.
   - `approved` means a launch is in flight. A launch can't survive a restart, so those become
@@ -144,7 +157,7 @@ Other polling rules:
 ### Web
 
 - **Pages:** server-rendered HTML, no framework. Modals are CSS `:target` (`#m-<identifier>`).
-- **Live script:** one nonce'd inline script (`LIVE_SCRIPT` in `html.ts`) handles everything
+- **Live script:** `src/web/assets/live.js`, embedded as one nonce'd inline script by `views/layout.ts`, handles everything
   client-side:
   - polls `/state` for the progress banner, the Dock badge (`setAppBadge`), the live log panel
     (`/events`) and page reloads (`version` or `boot` changing);
@@ -157,7 +170,7 @@ Other polling rules:
 - **`startWeb` extras:** `updater`, `health`, `reschedule`, `configPath` and `gh`. Every settings
   write goes through `configPath` and gh status through `gh`, so tests never touch the real config
   or gh logins.
-- **First-run setup** (`onboarding.ts`, `/setup`): repos → gh account → tracker sign-in →
+- **First-run setup** (`web/setup.ts` and `web/views/setup.ts`, `/setup`): repos → gh account → tracker sign-in →
   statuses → overview. `/` redirects there until `cfg.onboarded`.
   - Nothing polls before then: timers and web actions call `pollIfReady()`, not `poll()`. Tests
     call `poll()` directly.
@@ -171,7 +184,8 @@ Other polling rules:
   parent's name prepended. `loadConfig` migrates the old `reposRoot`/`repoMode`. **Choose in
   Finder** runs `choose folder` via osascript (`chooseFolders`); `addPicked` files repos vs parent
   folders.
-- **PWA:** the manifest, service worker and offline page are in `src/pwa.ts`; icons are in
+- **PWA:** the manifest is in `src/web/pwa.ts`, the service worker in `web/assets/service-worker.js`,
+  and offline markup in `web/views/offline.ts`; icons are in
   `public/icons` and are embedded with `with { type: "file" }`. Only paths routed in `serveStatic`
   are reachable.
   - The service worker is network-only apart from the cached offline page. Never cache pages,
@@ -190,7 +204,7 @@ Other polling rules:
   checkbox (see Erase all data).
 - **Claude launch command:** the prompt must come *before* `--add-dir`, because that option is
   variadic and swallows a following prompt. All directories (the briefs dir, then the extra
-  worktrees) follow the one `--add-dir`. Tests in `test/e2e.test.ts` pin this.
+  worktrees) follow the one `--add-dir`. Tests in `test/app/e2e.test.ts` pin this.
 - **Multi-repo launch order:** all worktrees are created in parallel (`Promise.all`; extras in the
   background), then saved to the row (a retry reuses them via `worktreeForBranch`), then the brief
   is rewritten with their paths, then the session opens.
@@ -206,7 +220,7 @@ Other polling rules:
 - **Bun reads the environment once at startup.** `Bun.spawn` and `Bun.which` ignore later changes
   to `process.env` (such as `preparePath()` under launchd), so always pass `env: process.env` and
   `{ PATH: process.env.PATH }`. A missing `env` once broke triage on fresh Homebrew installs
-  ("Executable not found: claude"); `test/llm.test.ts` guards it.
+  ("Executable not found: claude"); `test/triage/llm.test.ts` guards it.
 - **Secrets:** never write tokens or keys to files, logs, briefs or SQLite. Use `keychain.ts`, which
   passes values to `security` over stdin as hex. The GitHub token for a pinned account
   (`ghEnv`) stays in memory.

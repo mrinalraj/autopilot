@@ -325,7 +325,7 @@ launch interrupted by a restart comes back as `failed`, ready to retry.
 
 ## Configuration
 
-`config.json` overrides the defaults in `src/config.ts`. Relative paths are resolved from the
+`config.json` overrides the defaults in `src/config/config.ts`. Relative paths are resolved from the
 project directory, and `~` is expanded.
 
 | Key | Default | Notes |
@@ -408,36 +408,28 @@ bun test            # unit tests plus an end-to-end run with a fake Linear, LLM 
 bun run typecheck
 ```
 
+The directory boundaries and common edit paths are explained in [Architecture](docs/architecture.md).
+
 | Path | Role |
 | --- | --- |
-| `src/cli.ts` | Command-line entry (and the compiled binary's) |
-| `src/launch.ts` | Launchers: Supacode, Worktrunk, git, VS Code, Cursor |
-| `src/importer.ts` | Worktree scan and ticket-number matching for importing existing work |
-| `src/settings.ts` / `src/settings-page.ts` | Settings validation and saving / the settings page |
-| `src/health.ts` | Setup checks behind the home-screen tips |
-| `src/html.ts` | Shared page shell, styles and the live-update script |
-| `src/daemon.ts` | Daemon: web page, poll loop, work-check loop, update checks |
-| `src/update.ts` / `src/updater.ts` | Release checks and in-place installs / the daemon's update state |
-| `src/service.ts` / `src/env.ts` | LaunchAgent install / PATH and secrets setup for launchd |
-| `src/pwa.ts` | Manifest, service worker, offline page, embedded icons |
-| `src/autopilot.ts` | Detection, triage, approve, reject, launch orchestration |
-| `src/tracker.ts` / `src/connect.ts` | The `Tracker` interface and per-tracker specs / opening the configured one |
-| `src/linear.ts` / `src/jira.ts` / `src/adf.ts` | Linear and Jira Cloud clients / Atlassian rich text to Markdown |
-| `src/mcp.ts` | MCP session with reconnect, and the Keychain OAuth provider |
-| `src/login.ts` / `src/reset.ts` | `login` / `reset` commands |
-| `src/triage.ts` / `src/llm.ts` | Triage prompts and schemas / `claude -p` and API backends |
-| `src/branch.ts` | Branch name validation and repair |
-| `src/brief.ts` | Brief rendering (DB row → Markdown) |
-| `src/launch.ts` | git fetch and the Supacode CLI (deeplink fallback) |
-| `src/work.ts` | Commit and PR tracking for launched tickets |
-| `src/web.ts` | Approval page, live-update script, `/state`, PWA file routes |
-| `public/icons/` | App icons (embedded into the binary) |
-| `src/db.ts` | SQLite schema, migrations and queries |
-| `src/catalog.ts` | Repo catalog |
-| `src/notify.ts` / `src/keychain.ts` / `src/config.ts` / `src/log.ts` | Helpers |
-| `scripts/build.sh` | Release build |
-| `scripts/brew-formula.sh` / `scripts/brew-install-local.sh` | Homebrew formula (release or local) / local Homebrew install |
-| `test/` | Tests; `fake-supacode.sh` stands in for the Supacode CLI |
+| `src/cli.ts` | Stable command-line and compiled-binary entry point |
+| `src/app/` | Polling, approval/launch orchestration, daemon, login, reset, health |
+| `src/domain/` | Ticket/work types and pure rules: phases, risk, worktree identities |
+| `src/config/` / `src/storage/` | Configuration validation/persistence / SQLite schema and queries |
+| `src/trackers/` | Linear/Jira clients, tracker interface, MCP and OAuth provider |
+| `src/triage/` | LLM calls, prompts, branch validation, brief I/O and separate Markdown template |
+| `src/repos/` / `src/workspaces/` | Repo discovery/import / launchers, git and PR tracking |
+| `src/platform/` / `src/updates/` | macOS and external-tool adapters / release checks and installation |
+| `src/web/routes/` | Request handling and action dispatch; no page templates |
+| `src/web/presenters/` | Build page data from application state |
+| `src/web/views/` | HTML templates and components; no database, filesystem or subprocess access |
+| `src/web/assets/` | CSS, browser live-update script and service worker |
+| `src/web/server.ts` | HTTP composition, Host/Origin checks and CSRF protection |
+| `src/web/pwa.ts` / `src/web/static.ts` | Manifest and embedded assets / allowlisted file responses |
+| `src/shared/` / `src/types/` | Logging / asset import declarations |
+| `public/icons/` | App icons embedded into the binary |
+| `scripts/` | Release builds and Homebrew tooling |
+| `test/` | Tests grouped by subsystem; fake services and shared data under `test/fixtures/` |
 
 ## License
 
