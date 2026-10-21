@@ -14,6 +14,8 @@ export function preparePath() {
     join(home, ".local", "bin"),
     join(home, ".claude", "local", "bin"),
     join(home, ".bun", "bin"),
+    join(home, ".superset", "bin"),
+    join(home, "superset", "bin"),
     "/opt/homebrew/bin",
     "/opt/homebrew/sbin",
     "/usr/local/bin",

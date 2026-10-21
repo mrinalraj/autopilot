@@ -14,6 +14,7 @@ export interface TicketViewData {
   notes: ReadonlyMap<string, { level: "error" | "info"; msg: string }>;
   worktreeLinks: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
   tokenField: string;
+  canResendPrompt: boolean;
 }
 
 export type UpdateViewData = Pick<Updater, "info" | "status" | "error">;

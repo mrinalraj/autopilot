@@ -2,18 +2,20 @@
 
 A local macOS daemon that turns Linear or Jira tickets into Claude Code sessions, with you approving each one.
 
+[Changelog](CHANGELOG.md) · [Maintaining and reusing release notes](docs/changelog.md)
+
 It watches your tracker (Linear, or Jira Cloud) for tickets assigned to you in **Ready for Development**. For each one it picks
 the repo among the ones you picked (parent folders and/or individual repos), plus any other repos the ticket also changes. It proposes a branch,
 writes a short explainer, then asks you to approve or reject it on a local web page. When you
-approve, Supacode creates a worktree on that branch in every repo involved (its own branch creation
-and hooks run). A Claude Code session opens in the primary repo with the other worktrees added, so
+approve, the launcher selected in Settings creates a worktree on that branch in every repo involved.
+Its own worktree creation and lifecycle hooks run. A Claude Code session opens in the primary repo with the other worktrees added, so
 the agent can change them all. After that, the page tracks the work until the PRs are merged.
 
 ```
 Linear or Jira (MCP, OAuth) ──▶ newly eligible ticket ──▶ triage: repo + branch, explainer (claude -p)
    ──▶ SQLite row + read-only brief ──▶ macOS notification ──▶ http://localhost:4747
-   ──▶ Approve ──▶ per repo: git fetch + supacode repo worktree-new --branch …
-   ──▶ supacode tab new -i "claude '<init prompt>' --add-dir <briefs> <other worktrees…>"   (in the primary worktree)
+   ──▶ Approve ──▶ per repo: selected launcher creates or reuses a worktree
+   ──▶ selected launcher opens Claude in the primary worktree, with the brief and other worktrees
    ──▶ In progress: commits, PR state (git + gh) ──▶ merged
 ```
 
@@ -48,7 +50,7 @@ a local tap).
 
 ## Quick start
 
-Requirements: macOS, the Supacode app, the Claude Code CLI (logged in), and `gh` (logged in) for
+Requirements: macOS, your selected launcher, the Claude Code CLI (logged in), and `gh` (logged in) for
 PR tracking.
 
 With the standalone binary (from a release, or `bun run build`):
@@ -108,7 +110,7 @@ http://localhost:4747 opens with **setup tips** for anything missing:
 | Tip | Type |
 | --- | --- |
 | Claude Code CLI | required |
-| Supacode | required |
+| Selected launcher | required (Supacode, Superset, Worktrunk, git, VS Code or Cursor) |
 | GitHub CLI login, for PR tracking | optional |
 | terminal-notifier, or its notification permission | optional |
 | Installing the page as an app | optional |
@@ -142,14 +144,14 @@ Each card shows the live Linear status. The ⚙ button opens **Settings**.
 - **In progress:** tickets you've approved. Each card shows its stage:
   - in progress → committed → draft PR / PR open
   - plus the PR number, commits ahead of `origin/main`, uncommitted files and the time of the last commit
-  - with buttons for the PR on GitHub and **Open worktree**, which jumps to it in Supacode.
+  - with buttons for the PR on GitHub and **Open worktree**, which opens it with your selected launcher.
   - For multi-repo tickets: one line and one PR button per repo. The overall stage ignores repos the
     agent never touched, and the ticket is done once every touched repo's PR is merged or closed.
 - **Completed** (collapsible): every launched ticket whose PRs are merged or closed, or whose
   worktrees are gone, with links to its PRs.
 - **Rejected & dismissed** (collapsible): rejected tickets, and *dismissed* tickets, meaning ones
   that left Ready for Development or were reassigned before you acted.
-- **Delete worktrees…** (in a launched ticket's modal): removes its worktrees through Supacode,
+- **Delete worktrees…** (in a launched ticket's modal): removes its worktrees through your selected launcher,
   which also closes the Claude session in them. Before deleting, each worktree is re-checked. If
   any has uncommitted files or unpushed commits (or its state can't be read), the delete is refused
   unless you tick "delete anyway". A merged or closed PR counts as safe. The branch and PR are
@@ -180,9 +182,29 @@ backend needs a restart.
 | Launcher | Creates worktrees with | Claude session opens in |
 | --- | --- | --- |
 | Supacode (default) | `supacode repo worktree-new` (Supacode's hooks run) | a Supacode tab |
+| Superset | `superset workspaces create --local` (Superset manages setup and worktrees) | a Superset terminal |
 | Worktrunk | `wt switch --create` (Worktrunk's hooks run) | a new terminal tab |
 | git | `git worktree add` into `<first repo folder>/wt/<repo>/<branch>` | a new terminal tab |
 | VS Code / Cursor | git, as above; opens a new editor window with the ticket's worktrees | the editor's **chat panel** (default) or a new terminal tab |
+
+**Superset:** open the desktop app and sign in. It includes the CLI and starts its local host
+automatically, so you don't need to keep a separate terminal open. For a CLI-only installation,
+install the [Superset CLI](https://docs.superset.sh/cli/getting-started), sign in, and run
+`superset start --daemon` to start the host in the background. Choose **Settings → Launch →
+Superset**. Autopilot checks connectivity through the local projects API, since `superset status`
+can report a stale process for a working desktop host. It reuses a registered project for each local repo, registering it on
+first use if necessary, and creates one local workspace per repo with the exact ticket branch.
+The Claude terminal starts in the primary workspace with the brief and extra worktrees available
+through `--add-dir`. Background launches leave focus alone; foreground launches open Superset.
+Ticket links reopen the matching workspace. Existing worktrees are registered in Superset in place
+without rerunning setup scripts. On another machine, use `superset projects setup` to attach an existing
+organization project before approving tickets, to avoid registering a duplicate.
+
+`launch.supersetBin` defaults to `superset`; set an absolute CLI path in `config.json` if needed.
+The daemon also searches the desktop app's `~/.superset/bin` and the standalone install's
+`~/superset/bin`. Superset owns the worktree location and lifecycle scripts. Cleanup uses
+`superset workspaces archive --local` after the same unsaved/unpushed-work checks as other launchers;
+the branch stays. Changing the launcher also applies to existing tickets.
 
 **Chat panel (VS Code, Cursor):**
 - **Workspace:** the editor opens a workspace with the ticket's worktrees plus a small folder holding
@@ -197,9 +219,14 @@ backend needs a restart.
 - **Timing:** the prompt goes to the editor's focused window, so avoid switching windows for the
   couple of seconds while it opens.
 
-When any launcher other than Supacode is selected, a small dismissible **"Works best with
-Supacode"** hint appears. If Supacode is installed it suggests switching; otherwise it links to
-[supacode.sh](https://supacode.sh).
+Changing **Settings → Launch → Launcher** also reconfigures existing tickets. Worktrees keep their
+paths, branches and files, including uncommitted changes; the selected adapter registers them in
+place. Links, new launches, retries and cleanup all use the selection. Failed registration retries
+automatically every 30 seconds, even if the issue tracker is unavailable. Successful setup is
+remembered across restarts and does not rerun or start sessions. Errors appear on the ticket;
+Autopilot never opens the previous tool as a fallback. Open pages refresh when the selection
+changes. Existing terminal processes remain where they are. Launcher changes wait until an active
+ticket operation finishes.
 
 Terminal tabs start in the primary worktree:
 
@@ -209,8 +236,8 @@ Terminal tabs start in the primary worktree:
 | iTerm | Runs `claude` in a new tab. |
 | Warp | Opens a tab with Warp's own `warp://action/new_tab?path=…`. Warp can't be told to run a command, so the `claude` command is copied to your clipboard and a notification says so. |
 | none | Only creates the worktrees. |
-- **Remembered per ticket:** each ticket records the launcher that made its worktrees, and
-  **Delete worktrees…** removes them with that same tool. Supacode and Worktrunk keep the branch;
+- **Selected for every ticket:** **Delete worktrees…** uses the currently selected adapter after
+  registering existing worktrees with it when necessary. Supacode, Superset and Worktrunk keep the branch;
   git uses `git worktree remove`.
 - **First use of Terminal or iTerm:** macOS asks once whether autopilot may control it.
 
@@ -224,7 +251,12 @@ calls:
   `fix-tab-eng-4821` or `eng-6150`.
 
 A ticket's worktrees in several repos are grouped into one ticket. A ticket with no worktree still
-shows, with its Linear status only. Tickets that already have a card are left alone.
+shows, with its Linear status only. Imported Superset worktrees get Superset links and cleanup;
+each extra repo retains its own branch. Worktree discovery reads git without starting other tools;
+registration uses only the selected launcher.
+
+Imported tickets retain their tracker status and existing work. Their cards and details show
+progress and links without manual triage, session creation or launcher setup controls.
 
 ## Commands
 
@@ -305,12 +337,11 @@ repo or branch, and deleted on reject.
 
 **Launch.** Approving saves your edits and rewrites the brief, then:
 
-1. For each extra repo, then the primary: `git fetch origin` with your own git, and
-   `supacode repo worktree-new --branch <branch>`, which runs Supacode's branch creation and hooks.
-   Extra worktrees are created in the background.
+1. Create the primary and extra worktrees in parallel through the selected adapter, fetching
+   with your own git when enabled. Reuse existing branches and worktrees on retry.
 2. The brief is rewritten with every worktree path.
-3. `supacode tab new -i "claude '<init prompt>' --add-dir state/briefs <extra worktrees…>"` in the
-   primary worktree. Claude runs in normal permission mode. The init prompt tells it to read the
+3. Open Claude through the selected adapter in the primary worktree. Claude runs in normal
+   permission mode. The init prompt tells it to read the
    brief and names the other worktrees, with one PR per repo.
 
 If something fails, the card shows the error and a **Retry launch** button. A retry reuses the
@@ -350,7 +381,7 @@ project directory, and `~` is expanded.
 | `llm.provider` | `"cli"` | `"cli"` = `claude -p` with your Claude Code login. `"api"` = Anthropic SDK with `ANTHROPIC_API_KEY`. |
 | `llm.model` | `"claude-opus-5-5"` | |
 | `launch.fetch` | `true` | Run `git fetch origin` (with your git) before creating the worktree. |
-| `launch.base` | `""` | Passed to `worktree-new --base`. Empty = Supacode's default. |
+| `launch.base` | `""` | Base branch for the selected launcher. Empty uses that tool's default. |
 | `launch.background` | `false` | Create the worktree and tab without taking focus. |
 | `repos.<name>.description` | derived | Repo description used for routing. Worth setting when a README is misleading. |
 | `repos.<name>.exclude` | `false` | Leave a repo out of the catalog. |

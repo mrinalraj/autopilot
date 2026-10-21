@@ -29,8 +29,16 @@ export async function handleAction(path: string, form: FormData, ctx: WebContext
   }
   if (path === "/settings") {
     const githubBefore = ap.cfg.githubUser;
+    const launcherBefore = ap.cfg.launch.launcher;
+    if (form.get("launcher") !== launcherBefore && ap.launcherBusy) {
+      return go("/settings", "error", "A ticket action is still running. Save the launcher change after it finishes.");
+    }
     const res = saveSettings(ap.cfg, form, configPath);
     if (res.errors.length) return redirect(`/settings?error=${encodeURIComponent(res.errors.join(" "))}`);
+    if (ap.cfg.launch.launcher !== launcherBefore) {
+      ap.reconfigureLaunchers();
+      res.notes.push("Existing worktrees are being configured for the selected launcher. Failed setup retries automatically; completed setup is remembered.");
+    }
     if (ap.cfg.githubUser !== githubBefore) {
       void ap.refreshWork(); // notices the new account and re-checks every ticket
       res.notes.push("Re-checking every ticket's PRs with the new GitHub account.");
@@ -183,8 +191,16 @@ export async function handleAction(path: string, form: FormData, ctx: WebContext
   const resend = path.match(/^\/issues\/([^/]+)\/resend-prompt$/);
   if (resend) {
     const identifier = decodeURIComponent(resend[1]);
-    const res = await ap.resendPrompt(identifier);
-    return redirect(res.ok ? `/?notice=${encodeURIComponent(res.message)}` : `/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}`);
+    const res = ap.resendPrompt(identifier);
+    return go("/", res.ok ? "notice" : "error", res.ok ? `Sending ${identifier}'s prompt in the background.` : `${identifier}: ${res.error}`);
+  }
+  const triage = path.match(/^\/issues\/([^/]+)\/triage$/);
+  if (triage) {
+    const identifier = decodeURIComponent(triage[1]);
+    const res = ap.startTriage(identifier);
+    return redirect(res.ok
+      ? `/?logs=1&notice=${encodeURIComponent(`Triaging ${identifier} in the background; you can close this.`)}`
+      : `/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}`);
   }
   const back = path.match(/^\/issues\/([^/]+)\/send-back$/);
   if (back) {

@@ -55,6 +55,15 @@ test("invalid input is rejected and nothing is written", () => {
   expect(readFileSync(configPath, "utf8")).toBe(before);
 });
 
+test("Superset can be selected in Settings while retaining a custom CLI path", () => {
+  const path = join(dir, "superset.json");
+  writeFileSync(path, JSON.stringify({ launch: { supersetBin: "/custom/bin/superset" } }));
+  const cfg = loadConfig(path);
+  expect(saveSettings(cfg, form({ ...valid, launcher: "superset" }), path).errors).toEqual([]);
+  expect(cfg.launch).toMatchObject({ launcher: "superset", supersetBin: "/custom/bin/superset" });
+  expect(loadConfig(path).launch.launcher).toBe("superset");
+});
+
 test("individual repos and ticket prefixes are validated and saved", () => {
   const elsewhere = join(dir, "elsewhere", "api");
   mkdirSync(join(elsewhere, ".git"), { recursive: true });

@@ -2,6 +2,7 @@ import { repoSources } from "../repos/catalog";
 import { existsSync, readdirSync } from "node:fs";
 import type { Config } from "../config/config";
 import { notifyState } from "../platform/notify";
+import { run, shellQuote } from "../workspaces/common";
 import { ghEnv } from "../workspaces/work";
 
 /** Something the setup is missing, shown as a banner on the home screen until it's fixed. */
@@ -77,6 +78,7 @@ export class Health {
     const launcher = this.cfg.launch.launcher;
     const missing: Record<string, [boolean, string, string]> = {
       supacode: [!existsSync(this.cfg.launch.supacodeBin) && !app("supacode"), "Supacode isn't installed", "Approving a ticket creates its worktree and Claude session in Supacode."],
+      superset: [!has(this.cfg.launch.supersetBin), "Superset CLI isn't installed", "Approving a ticket creates a local Superset workspace and starts Claude in its terminal."],
       worktrunk: [!has("wt"), "Worktrunk (wt) isn't installed", "The Worktrunk launcher creates worktrees with `wt switch --create`."],
       vscode: [!app("Visual Studio Code"), "VS Code isn't installed", "The VS Code launcher opens each ticket's worktrees as a VS Code workspace."],
       cursor: [!app("Cursor"), "Cursor isn't installed", "The Cursor launcher opens each ticket's worktrees as a Cursor workspace."],
@@ -86,9 +88,21 @@ export class Health {
     if (isMissing) {
       items.push({ id: `launcher-${launcher}`, level: "required", title, detail: `${why} Install it, or pick another launcher in Settings. Approvals fail until then.` });
     }
+    if (launcher === "superset" && !isMissing) {
+      try {
+        // `status` can reject the desktop app's PID even while its host serves requests.
+        // Probe the same local API the launcher needs, without relying on process metadata.
+        const projects = JSON.parse(await run([this.cfg.launch.supersetBin, "projects", "list", "--local", "--json"], 5_000));
+        if (!Array.isArray(projects)) throw new Error("Superset returned an invalid project list");
+      } catch {
+        items.push({ id: "superset-host", level: "required", title: "Autopilot can't connect to Superset",
+          detail: "Open Superset and sign in; the desktop app starts its local host automatically. If it's already open, check that the CLI uses the same account and organization. For CLI-only use, run `superset start --daemon` to start the host in the background. The command below checks the connection.",
+          command: `${shellQuote(this.cfg.launch.supersetBin)} projects list --local --json` });
+      }
+    }
     const term = this.cfg.launch.terminal;
     const termApp: Record<string, string> = { iterm: "iTerm", warp: "Warp" };
-    if (launcher !== "supacode" && termApp[term] && !app(termApp[term])) {
+    if (launcher !== "supacode" && launcher !== "superset" && termApp[term] && !app(termApp[term])) {
       items.push({
         id: `terminal-${term}`,
         level: "required",
@@ -125,16 +139,6 @@ export class Health {
         command: this.cfg.launch.worktreesDir,
         action: { path: `/actions/trust-folder`, label: `Open in ${editorName} to trust it`, busy: "Opening…" },
       });
-    }
-
-    // Supacode gives the smoothest experience (worktree hooks, a tab per ticket); suggest it gently.
-    if (launcher !== "supacode") {
-      const supacodeInstalled = existsSync(this.cfg.launch.supacodeBin) || app("supacode");
-      items.push(
-        supacodeInstalled
-          ? { id: "supacode-hint", level: "hint", title: "Works best with Supacode", detail: "Supacode is installed: pick it in Settings → Launch for worktree hooks and a Claude tab per ticket." }
-          : { id: "supacode-hint", level: "hint", title: "Works best with Supacode", detail: "Worktree hooks and a Claude tab per ticket, all in one app.", link: { href: "https://supacode.sh", label: "Get Supacode" } },
-      );
     }
 
     if (repoSources(this.cfg).length === 0) {

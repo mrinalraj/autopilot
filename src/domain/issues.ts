@@ -25,6 +25,9 @@ export interface ExtraRepo {
   repo_path: string;
   reason: string;
   worktree_id: string | null;
+  /** Last adapter to adopt this worktree; imported branches may differ from the primary. */
+  launcher?: string;
+  branch?: string;
 }
 
 export type IssueStatus = "pending" | "approved" | "rejected" | "running" | "failed";
@@ -41,6 +44,8 @@ export interface IssueRow {
   branch: string;
   confidence: number;
   resolve_reason: string;
+  /** Null for imported summaries that have not gone through the LLM. */
+  triage_source: "automatic" | "manual" | null;
   status: IssueStatus;
   error: string | null;
   worktree_id: string | null;
@@ -50,7 +55,7 @@ export interface IssueRow {
   /** Live Linear workflow status (name and type) for launched and imported tickets. */
   linear_state: string | null;
   linear_state_type: string | null;
-  /** Launcher that created the worktrees (so cleanup uses the same tool). */
+  /** Last adapter that successfully adopted the worktrees; never overrides Settings. */
   launcher: string | null;
   /** ExtraRepo[] as JSON; the primary repo is `repo`. */
   extra_repos_json: string;
@@ -77,6 +82,9 @@ export function phaseOf(row: IssueRow, work: RepoWork[] | null): Phase {
 export const issueExtras = (row: IssueRow): ExtraRepo[] => JSON.parse(row.extra_repos_json || "[]");
 export const explainerOf = (row: IssueRow): Explainer => JSON.parse(row.explainer_json);
 export const ticketOf = (row: IssueRow): TicketSnapshot => JSON.parse(row.ticket_json);
+export const needsTriage = (row: IssueRow): boolean => row.status === "running" && row.triage_source === null;
+export const usesLauncher = (row: IssueRow, name: string): boolean =>
+  row.launcher === name && issueExtras(row).every((e) => !e.worktree_id || e.launcher === name);
 
 /** Older rows stored one work result, before tickets could span multiple repos. */
 export function workOf(row: IssueRow): RepoWork[] | null {
@@ -85,9 +93,12 @@ export function workOf(row: IssueRow): RepoWork[] | null {
   return Array.isArray(work) ? work : [{ repo: row.repo, ...work }];
 }
 
-export function worktreesOf(row: IssueRow): { repo: string; repoPath: string; worktreeId: string }[] {
+export function worktreesOf(row: IssueRow): { repo: string; repoPath: string; worktreeId: string; launcher?: string; branch?: string }[] {
   return [
     ...(row.worktree_id ? [{ repo: row.repo, repoPath: row.repo_path, worktreeId: row.worktree_id }] : []),
-    ...issueExtras(row).flatMap((e) => e.worktree_id ? [{ repo: e.repo, repoPath: e.repo_path, worktreeId: e.worktree_id }] : []),
+    ...issueExtras(row).flatMap((e) => e.worktree_id ? [{
+      repo: e.repo, repoPath: e.repo_path, worktreeId: e.worktree_id,
+      ...(e.launcher ? { launcher: e.launcher } : {}), ...(e.branch ? { branch: e.branch } : {}),
+    }] : []),
   ];
 }

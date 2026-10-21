@@ -38,7 +38,7 @@ export async function handlePage(url: URL, ctx: WebContext): Promise<Response> {
   }
   if (path === "/" && !ap.cfg.onboarded) return redirect("/setup");
   if (path === "/") {
-    const data = dashboardData(ctx, error, notice);
+    const data = await dashboardData(ctx, error, notice);
     return page(data.queue.length ? "(" + data.queue.length + ") Autopilot" : "Autopilot", dashboardBody(data));
   }
   if (path === "/setup") {

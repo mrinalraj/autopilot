@@ -3,14 +3,14 @@
 autopilot (formerly linear-autopilot) is a local macOS daemon in Bun + TypeScript. It watches a
 tracker (Linear, or Jira Cloud) for tickets assigned to the user in their pickup statuses, triages
 each one with `claude -p` (repo, extra repos, branch, explainer), and asks for approval on a local
-page. On approval it creates a worktree per repo through the chosen launcher (Supacode, Worktrunk,
+page. On approval it creates a worktree per repo through the chosen launcher (Supacode, Superset, Worktrunk,
 git, VS Code or Cursor) and starts a Claude Code session with a ticket brief. It then tracks commits
 and PRs until they're merged. README.md is the user-facing picture.
 
 ## Commands
 
 ```sh
-bun test                 # must pass before you finish; fakes only, never real Linear/Jira/Supacode/gh
+bun test                 # must pass before you finish; fakes only, never real Linear/Jira/Supacode/Superset/gh
 bun run typecheck        # tsc --noEmit
 bun run start            # dev daemon on http://localhost:4800 (data in the project folder)
 bun run once             # one real poll (needs a sign-in)
@@ -75,14 +75,18 @@ Type-only imports for data contracts are permitted.
 SQLite (`src/storage/db.ts`) is the single source of truth.
 
 - **`issues`:** one row per ticket. Status is `pending | approved | rejected | running | failed`.
+  - `triage_source` is `automatic | manual | null`; null marks imported summaries awaiting triage.
+    Manual triage of open tickets without worktrees moves them to approval and bypasses pickup-state
+    filtering, but reassignment or closing still dismisses them. Existing worktrees keep their ownership.
   - `approved` means a launch is in flight. A launch can't survive a restart, so those become
     `failed` on start.
   - Dismissed tickets are `rejected`, with an `error` starting with `Dismissed:`.
   - `repo` / `repo_path` / `worktree_id` belong to the primary repo. `extra_repos_json` holds the
-    others (`ExtraRepo[]`, read with `Store.extras(row)`), each with its own `worktree_id` on the
-    same branch.
+    others (`ExtraRepo[]`, read with `Store.extras(row)`), each with its own `worktree_id` and
+    optional branch override for imported worktrees.
   - `work_json` is `RepoWork[]`, primary first; read it with `Autopilot.work(row)`.
-  - `worktree_id` is Supacode's ID form: the percent-encoded path (`supacodeId` / `pathFromId`).
+  - `worktree_id` is a provider-independent percent-encoded path (`worktreeId` / `pathFromId`).
+  - `launcher` records the last adapter to adopt a worktree. It never overrides the selected launcher.
   - `linear_id`, `linear_state` and `linear_state_type` hold the *active tracker's* ID and status,
     Jira's too. The column names are historical.
 - **`assignments`:** eligibility tracking. Despite its name, `assigned = 1` means *currently
@@ -210,11 +214,22 @@ Other polling rules:
   is rewritten with their paths, then the session opens.
 - **Never pass Supacode's `--fetch`.** Supacode runs `/usr/bin/git`, whose credential helper isn't
   trusted for the github.com Keychain item, so the user gets a Keychain prompt on every launch. The
-  daemon fetches with its own `git` instead (`fetchOrigin` in `launch.ts`).
-- **Supacode and Worktrunk own their worktrees,** so their hooks run. Only the git, VS Code and
-  Cursor launchers call `git worktree add`/`remove` themselves. Read-only git (`worktree list`,
-  `rev-list`, `status`) is fine anywhere.
-- **Worktrees are created and removed by the ticket's launcher** (`launcherFor(cfg, row.launcher)`).
+  daemon fetches with its own `git` instead (`fetchOrigin` in `workspaces/common.ts`).
+- **Launcher adapters are interchangeable.** The registry in `workspaces/launch.ts` uses only
+  `cfg.launch.launcher`; unknown names never fall back to an app. Adapters implement creation,
+  adoption, sessions, cleanup and links. Core workflows never query an unselected provider.
+  Changes in Settings and startup adopt existing worktrees in place before recording the new adapter.
+  A separate 30-second timer retries unfinished setup even if tracker polling fails; successful setup
+  is skipped across restarts. Preserve paths, branches, dirty files and PR tracking; never recreate
+  work to migrate it. Tickets have no manual triage, open-session or launcher-setup buttons.
+- **Superset** uses its CLI against the local host (`--local` on every host-scoped call). Resolve
+  project/workspace UUIDs by local path; keep stored worktree IDs as encoded paths. The adapter
+  lives in `workspaces/superset.ts`. Never archive a main checkout or fall back to git on a failed
+  archive. Setup-free adoption uses the local authenticated `workspaceCreation.adopt` procedure
+  in `workspaces/superset-host.ts`; tokens stay in memory and requests stay on loopback. Imported
+  extra repos retain their own branches when changing adapters.
+- **Worktrees are created and removed by the selected launcher** (`launcherFor(cfg)`), adopting
+  existing work first when needed. Migration failures remain visible and retryable; never call the old app.
   Never `rm -rf` a worktree. Always re-check with `checkWork` and refuse on `atRisk` unless forced;
   unknown state counts as at risk. Erasing data never touches worktrees or branches.
 - **Bun reads the environment once at startup.** `Bun.spawn` and `Bun.which` ignore later changes
@@ -247,14 +262,21 @@ Other polling rules:
 
 All releases so far are pre-releases (`0.1.0-beta.N`); the latest is beta.8.
 
+`CHANGELOG.md` is the source of truth for release notes. Include user-visible changes under
+`Unreleased` in their implementation commit. Committing or pushing does not authorize a release,
+version bump, tag or installation. See [docs/changelog.md](docs/changelog.md) for the workflow;
+`bun run changelog [version] [--json]` exports a section for other tools without publishing it.
+
 1. **Branch and PR:** work on a feature branch and open a PR to `main` on GitHub. The PR is
    squash-merged.
-2. **Version:** on `main`, bump `version` in `package.json`, commit, and make an annotated tag
+2. **Version:** on `main`, move Unreleased notes into a versioned, dated changelog section, leave a
+   new Unreleased section, bump `version` in `package.json`, commit, and make an annotated tag
    `v<version>`. Push `main` and the tag. Never retag or force-push a pushed tag; ship the next
    beta instead.
 3. **Build:** `bun run build`.
-4. **Publish:** `gh release create v<version> --repo mrinalraj/autopilot --prerelease` with the two
-   tarballs and `checksums.txt`.
+4. **Publish:** export `bun run changelog <version> > /tmp/autopilot-release-notes.md`, then
+   `gh release create v<version> --repo mrinalraj/autopilot --prerelease --notes-file /tmp/autopilot-release-notes.md`
+   with the two tarballs and `checksums.txt`.
 5. **Tap:** `scripts/brew-formula.sh` writes `packaging/autopilot.rb` (git-ignored). Copy it to
    `Formula/autopilot.rb` in github.com/mrinalraj/homebrew-tap and push.
 6. **Upgrade:** users get it with `brew update && brew upgrade autopilot && brew services restart
@@ -286,7 +308,7 @@ GitHub accounts on this machine:
   - trackers: `FakeLinear` in `e2e.test.ts`, `FakeJira` in `fake-jira.ts`, built from recorded
     Atlassian responses;
   - the LLM: `FakeLLM`;
-  - Supacode: `fake-supacode.sh`;
+  - Supacode: `fake-supacode.sh`; Superset: `fake-superset.ts` (copied into a temp repo);
   - web tests: `configPath`/`gh` extras on `startWeb`.
 
   Set `AUTOPILOT_NOTIFY=off`. Configs in tests use `repoRoots: [...]`, and `onboarded: true`

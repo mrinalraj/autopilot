@@ -33,6 +33,8 @@ export async function runDaemon(opts: { once?: boolean } = {}) {
     timers = [
       setInterval(() => void ap.pollIfReady(), cfg.pollIntervalSeconds * 1000),
       setInterval(() => void ap.refreshWork(), cfg.workCheckIntervalSeconds * 1000),
+      // Local setup must recover even while the tracker is signed out or unavailable.
+      setInterval(() => ap.reconfigureLaunchers(), 30_000),
     ];
   }
 
@@ -51,6 +53,7 @@ export async function runDaemon(opts: { once?: boolean } = {}) {
   }
   log.info(`polling ${tracker.label} every ${cfg.pollIntervalSeconds}s; ${repoSources(cfg).length} repos; llm ${cfg.llm.provider}/${cfg.llm.model}`);
   reschedule();
+  ap.reconfigureLaunchers();
   if (!cfg.onboarded) log.info(`first run: finish setup at ${baseUrl(cfg)}/setup; nothing is checked until then`);
   await ap.pollIfReady();
   void ap.refreshWork();

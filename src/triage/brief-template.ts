@@ -15,19 +15,22 @@ export function renderBrief(row: IssueRow): string {
   const t: TicketSnapshot = JSON.parse(row.ticket_json);
   const ex: Explainer = JSON.parse(row.explainer_json);
   const source = t.tracker ?? "Linear";
+  const extras = issueExtras(row);
+  const sameBranch = extras.every((e) => !e.branch || e.branch === row.branch);
   const meta = [
     `- ${source}: [${row.identifier}](${row.url})`,
     `- ${source === "Jira" ? "Project" : "Team"}: ${oneLine(t.team)}`,
     t.project ? `- ${source === "Jira" ? "Parent" : "Project"}: ${oneLine(t.project)}` : null,
     t.labels.length ? `- Labels: ${t.labels.map(oneLine).join(", ")}` : null,
     ...t.attachments.map((a) => `- Attachment: ${oneLine(a.title)} <${a.url}>`),
-    `- Branch: \`${row.branch}\` (in every repo)`,
+    `- Branch: \`${row.branch}\` (${sameBranch ? "in every repo" : "primary repo"})`,
   ].filter(Boolean);
   const repoLine = (label: string, repo: string, repoPath: string, wt: string | null, reason: string) =>
     `- ${label}: \`${repo}\` (\`${repoPath}\`)${wt ? ` — worktree \`${wt}\`` : ""}${reason ? ` — ${oneLine(reason)}` : ""}`;
   const repos = [
     repoLine("Primary", row.repo, row.repo_path, worktreePath(row.worktree_id), ""),
-    ...issueExtras(row).map((e) => repoLine("Also", e.repo, e.repo_path, worktreePath(e.worktree_id), e.reason)),
+    ...extras.map((e) => repoLine("Also", e.repo, e.repo_path, worktreePath(e.worktree_id), e.reason) +
+      (e.branch && e.branch !== row.branch ? ` — branch \`${e.branch}\`` : "")),
   ];
   const comments = t.comments.length
     ? t.comments.map((c) => `${oneLine(c.author)} at ${c.createdAt}:\n\n${fenced(c.body)}`).join("\n\n")

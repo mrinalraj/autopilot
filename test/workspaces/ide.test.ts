@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ideChatUrl, ideWorkspace } from "../../src/workspaces/launch";
+import { ideChatUrl, ideWorkspace, launcherFor } from "../../src/workspaces/launch";
 import { loadConfig } from "../../src/config/config";
 import { Health } from "../../src/app/health";
 
@@ -16,6 +16,20 @@ test("chat links: VS Code → Claude extension; Cursor → its own chat or the C
   expect(ideChatUrl("cursor", "cursor", prompt)).toBe(`cursor://anysphere.cursor-deeplink/prompt?text=${enc}`);
   expect(ideChatUrl("cursor", "claude", prompt)).toBe(`cursor://anthropic.claude-code/open?prompt=${enc}`);
   expect(enc).toContain("%26"); // "&" can't truncate the prompt
+});
+
+test("editor worktree links preserve spaces, Unicode and URL-reserved path characters", async () => {
+  const cfg = loadConfig("/nonexistent");
+  const path = "/work/user's project/日本語 #1?draft%/fix-eng-1";
+  for (const launcher of ["cursor", "vscode"] as const) {
+    cfg.launch.launcher = launcher;
+    const url = new URL((await launcherFor(cfg).link(path))!);
+    expect(url.protocol).toBe(`${launcher}:`);
+    expect(url.hostname).toBe("file");
+    expect(decodeURIComponent(url.pathname)).toBe(path);
+    expect(url.search).toBe("");
+    expect(url.hash).toBe("");
+  }
 });
 
 test("IDE brief lives inside the primary worktree (git-ignored); several repos get a workspace file there", async () => {
@@ -38,14 +52,10 @@ test("IDE brief lives inside the primary worktree (git-ignored); several repos g
   expect(readFileSync(join(repo, ".git", "info", "exclude"), "utf8").split("\n").filter((l) => l === ".autopilot/")).toHaveLength(1);
 });
 
-test("non-Supacode launchers get a small, dismissible 'works best with Supacode' hint", async () => {
+test("choosing another launcher does not promote Supacode", async () => {
   const base = loadConfig("/nonexistent");
   const items = await new Health({ ...base, launch: { ...base.launch, launcher: "git", terminal: "none" } }).refresh();
-  const hint = items.find((i) => i.id === "supacode-hint");
-  expect(hint?.level).toBe("hint");
-  const installed = existsSync("/Applications/supacode.app") || existsSync(base.launch.supacodeBin);
-  expect(!!hint?.link).toBe(!installed); // the "Get Supacode" link only when it's missing
-  expect((await new Health(base).refresh()).some((i) => i.id === "supacode-hint")).toBe(false); // already on Supacode
+  expect(items.some((i) => i.id.includes("supacode"))).toBe(false);
 });
 
 test("reads the editor's trusted folders (read-only), honouring parent folders", async () => {

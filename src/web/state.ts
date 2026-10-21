@@ -9,7 +9,8 @@ export function stateVersion(ap: Autopilot, updater?: Updater): string {
     .query<{ n: number; t: string | null }, []>("SELECT COUNT(*) AS n, MAX(updated_at) AS t FROM issues")
     .get();
   const notes = [...ap.notes.entries()].map(([k, n]) => `${k}:${n.level}:${n.msg.length}`).join(",");
-  return `${v?.n ?? 0}|${v?.t ?? ""}|${ap.lastPollError ?? ""}|${updater?.status ?? ""}|${updater?.info?.latest ?? ""}|${notes}|${[...launchSteps.keys()].join(",")}`;
+  const launch = ap.cfg.launch;
+  return `${v?.n ?? 0}|${v?.t ?? ""}|${ap.lastPollError ?? ""}|${updater?.status ?? ""}|${updater?.info?.latest ?? ""}|${notes}|${[...launchSteps.keys()].join(",")}|${launch.launcher}:${launch.terminal}:${launch.ideSession}:${launch.cursorChat}`;
 }
 
 export function liveState({ ap, updater, bootId }: WebContext) {

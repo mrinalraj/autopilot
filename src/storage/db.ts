@@ -64,6 +64,11 @@ export class Store {
     if (!columns.includes("launcher")) this.db.exec("ALTER TABLE issues ADD COLUMN launcher TEXT");
     if (!columns.includes("linear_state")) this.db.exec("ALTER TABLE issues ADD COLUMN linear_state TEXT; ALTER TABLE issues ADD COLUMN linear_state_type TEXT");
     if (!columns.includes("extra_repos_json")) this.db.exec("ALTER TABLE issues ADD COLUMN extra_repos_json TEXT NOT NULL DEFAULT '[]'");
+    if (!columns.includes("triage_source")) {
+      this.db.exec("ALTER TABLE issues ADD COLUMN triage_source TEXT");
+      // Generated explainers always have a size; imported placeholders use an empty string.
+      this.db.exec("UPDATE issues SET triage_source = 'automatic' WHERE json_extract(explainer_json, '$.size') IN ('S', 'M', 'L')");
+    }
     // v2 tracks eligibility instead of plain assignment: re-baseline from scratch.
     if (this.getMeta("tracking_version") !== "2") {
       this.db.exec("DELETE FROM assignments; DELETE FROM meta WHERE key = 'poll_cursor';");
@@ -147,25 +152,26 @@ export class Store {
     return this.db.query<IssueRow, [string]>("SELECT * FROM issues WHERE identifier = ?").get(identifier);
   }
 
-  upsertIssue(row: Omit<IssueRow, "created_at" | "updated_at" | "work_json" | "launcher" | "linear_state" | "linear_state_type">) {
+  upsertIssue(row: Omit<IssueRow, "created_at" | "updated_at" | "work_json" | "launcher" | "linear_state" | "linear_state_type" | "triage_source"> & { triage_source?: IssueRow["triage_source"] }) {
     const t = now();
     this.db
       .query(
         `INSERT OR REPLACE INTO issues (linear_id, identifier, title, url, brief_path, repo, repo_path, branch,
-           confidence, resolve_reason, status, error, worktree_id, ticket_json, explainer_json, extra_repos_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           confidence, resolve_reason, status, error, worktree_id, ticket_json, explainer_json, extra_repos_json, triage_source, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.linear_id, row.identifier, row.title, row.url, row.brief_path, row.repo, row.repo_path,
         row.branch, row.confidence, row.resolve_reason, row.status, row.error, row.worktree_id, row.ticket_json,
-        row.explainer_json, row.extra_repos_json, t, t,
+        row.explainer_json, row.extra_repos_json, row.triage_source === undefined ? "automatic" : row.triage_source, t, t,
       );
   }
 
   updateIssue(
     linearId: string,
     fields: Partial<
-      Pick<IssueRow, "repo" | "repo_path" | "branch" | "status" | "error" | "worktree_id" | "extra_repos_json" | "launcher" | "linear_state" | "linear_state_type">
+      Pick<IssueRow, "repo" | "repo_path" | "branch" | "status" | "error" | "worktree_id" | "extra_repos_json" | "launcher" | "linear_state" | "linear_state_type" |
+        "title" | "url" | "ticket_json" | "explainer_json" | "confidence" | "resolve_reason" | "triage_source">
     >,
   ) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];

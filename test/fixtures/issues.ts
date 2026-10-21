@@ -4,7 +4,7 @@ import type { RepoWork } from "../../src/domain/work";
 export const issue = (patch: Partial<IssueRow> = {}): IssueRow => ({
   linear_id: "ticket-1", identifier: "ENG-1", title: "Fix widget", url: "https://example.test/ENG-1",
   brief_path: "/briefs/ENG-1.md", repo: "api", repo_path: "/code/api", branch: "fix-widget-eng-1",
-  confidence: 0.8, resolve_reason: "API change", status: "pending", error: null,
+  confidence: 0.8, resolve_reason: "API change", triage_source: "automatic", status: "pending", error: null,
   worktree_id: null, linear_state: "Todo", linear_state_type: "unstarted", launcher: "supacode",
   ticket_json: JSON.stringify({ description: "Widget details", comments: [], team: "Eng", project: null, labels: [], attachments: [], state: "Todo" }),
   explainer_json: JSON.stringify({ summary: "Fix widget", approach: "Update API", likely_areas: ["src/api.ts"], size: "S" }),

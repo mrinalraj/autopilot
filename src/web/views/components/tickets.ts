@@ -40,7 +40,7 @@ export function ticketComponents(data: TicketViewData) {
     </article>`;
   }
 
-  /** Opens a worktree in the tool that made it (Supacode, VS Code, Cursor); null for terminal launchers. */
+  /** Opens existing work with the selected launcher, regardless of its original tool. */
   const linkFor = (r: IssueRow, path: string) => data.worktreeLinks.get(r.linear_id)?.get(path) ?? null;
   const worktreeLink = (r: IssueRow) => (r.worktree_id ? linkFor(r, pathFromId(r.worktree_id)) : null);
 
@@ -68,7 +68,7 @@ export function ticketComponents(data: TicketViewData) {
       ${summary}
       ${data.steps.has(r.identifier) ? stepLine(r) : noteLine(r)}
       <div class="actions">${prs.map((w) => `<a class="btn primary" href="${esc(w.pr!.url)}" target="_blank" rel="noreferrer">${multi ? `${esc(w.repo)} ` : ""}PR #${w.pr!.number} ↗</a>`).join("")}
-        ${wt ? `<a class="btn" href="${esc(wt)}">Open worktree</a>` : ""}${resendButton(r)}</div>
+        ${wt ? `<a class="btn" href="${esc(wt)}">Open worktree</a>` : ""}${promptButton(r)}</div>
     </article>`;
   }
 
@@ -102,10 +102,10 @@ export function ticketComponents(data: TicketViewData) {
       ${list.map(repoFacts).join("")}</div>`;
   }
 
-  /** For VS Code/Cursor chat launches: re-send the prompt (e.g. after trusting the folder). */
-  function resendButton(r: IssueRow) {
-    if (!r.worktree_id || (r.launcher !== "vscode" && r.launcher !== "cursor") || data.cfg.launch.ideSession !== "chat") return "";
-    return `<form method="post" action="${actionBase(r)}/resend-prompt">${tokenField}<button data-busy-label="Sending…" title="Send the prompt to the editor's chat again">Send prompt to chat</button></form>`;
+  function promptButton(r: IssueRow) {
+    if (!data.canResendPrompt || !r.worktree_id || r.status !== "running") return "";
+    const disabled = data.steps.has(r.identifier) ? " disabled" : "";
+    return `<form method="post" action="${actionBase(r)}/resend-prompt">${tokenField}<button data-busy-label="Sending…"${disabled}>Send prompt to chat</button></form>`;
   }
 
   /** "Send back to approval…": undo a launch (removes what's left of its worktrees), keeping triage. */
@@ -114,7 +114,7 @@ export function ticketComponents(data: TicketViewData) {
     if (data.steps.has(r.identifier)) return `<div class="box">${stepLine(r)}</div>`;
     const risks = (workOf(r) ?? []).flatMap((w) => atRisk(w).map((x) => `${w.repo}: ${x}`));
     return `<details class="danger"><summary>Send back to approval…</summary>
-      <p class="small muted" style="margin:8px 0 4px">Moves this ticket back to Awaiting approval with its current repo, branch and explainer, so you can approve it again. Any of its worktrees that still exist are removed first (closing their Claude session); its branches are kept and reused.</p>
+      <p class="small muted" style="margin:8px 0 4px">Moves this ticket back to Awaiting approval with its current repo, branch and explainer, so you can approve it again. Any of its worktrees that still exist are removed first using the selected launcher; its branches are kept and reused.</p>
       ${risks.length ? `<div class="alert">At the last check this would lose: ${esc(risks.join(", "))}. It's re-checked first.</div>` : ""}
       <form method="post" action="${actionBase(r)}/send-back">${tokenField}
         <label class="check"><input type="checkbox" name="force" value="1"> Remove worktrees anyway, even with uncommitted or unpushed work</label>
@@ -132,7 +132,7 @@ export function ticketComponents(data: TicketViewData) {
     if (!live.length) return "";
     const risks = work.flatMap((w) => atRisk(w).map((x) => `${w.repo}: ${x}`));
     return `<details class="danger"><summary>Delete worktree${live.length === 1 ? "" : "s"}…</summary>
-      <p class="small muted" style="margin:8px 0 4px">Removes ${live.length === 1 ? "this worktree" : "these worktrees"} through Supacode, which also closes the Claude session in ${live.length === 1 ? "it" : "them"}. The branch, commits already pushed, and any PR stay; PR tracking carries on.</p>
+      <p class="small muted" style="margin:8px 0 4px">Removes ${live.length === 1 ? "this worktree" : "these worktrees"} using the selected launcher. The branch, commits already pushed, and any PR stay; PR tracking carries on.</p>
       <ul class="small">${live.map((w) => `<li><code>${esc(decodeURIComponent(w.worktreeId).replace(/\/$/, ""))}</code></li>`).join("")}</ul>
       ${risks.length ? `<div class="alert">At the last check this would lose: ${esc(risks.join(", "))}. It's re-checked before deleting.</div>` : ""}
       <form method="post" action="${actionBase(r)}/delete-worktrees">${tokenField}
@@ -199,11 +199,14 @@ export function ticketComponents(data: TicketViewData) {
             <div>
               <div class="box"><h3>${ex.approach ? `Explainer${ex.size ? ` · size ${esc(ex.size)}` : ""}` : "Summary"}</h3><p style="margin-top:0">${esc(ex.summary)}</p>
                 <p><strong>Approach.</strong> ${esc(ex.approach)}</p>
-                <strong class="small">Likely areas</strong><ul class="small">${ex.likely_areas.map((a) => `<li><code>${esc(a)}</code></li>`).join("")}</ul></div>
+                <strong class="small">Likely areas</strong><ul class="small">${ex.likely_areas.map((a) => `<li><code>${esc(a)}</code></li>`).join("")}</ul>
+                </div>
               ${r.status === "running" ? progressBox(r) : ""}
               ${deleteBox(r)}
               ${sendBackBox(r)}
               <div class="box"><h3>Launch</h3>${form}
+                ${data.steps.has(r.identifier) ? stepLine(r) : noteLine(r)}
+                ${data.canResendPrompt ? `<div class="actions">${promptButton(r)}</div>` : ""}
                 <p class="small muted" style="margin:14px 0 0">Brief for the session: <code>${esc(r.brief_path)}</code></p></div>
             </div>
           </div>
