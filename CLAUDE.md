@@ -1,78 +1,182 @@
 # CLAUDE.md
 
-autopilot is a local macOS daemon in Bun + TypeScript. It polls Linear for tickets assigned
-to the user in Ready for Development and triages them with `claude -p`. On approval it launches a
-Supacode worktree with a Claude Code session, then tracks commits and the PR. See README.md for the
-user-facing picture.
+autopilot (formerly linear-autopilot) is a local macOS daemon in Bun + TypeScript. It watches a
+tracker (Linear, or Jira Cloud) for tickets assigned to the user in their pickup statuses, triages
+each one with `claude -p` (repo, extra repos, branch, explainer), and asks for approval on a local
+page. On approval it creates a worktree per repo through the chosen launcher (Supacode, Worktrunk,
+git, VS Code or Cursor) and starts a Claude Code session with a ticket brief. It then tracks commits
+and PRs until they're merged. README.md is the user-facing picture.
 
 ## Commands
 
 ```sh
-bun test                 # must pass before you finish; the e2e test uses fakes, never real Linear/Supacode
+bun test                 # must pass before you finish; fakes only, never real Linear/Jira/Supacode/gh
 bun run typecheck        # tsc --noEmit
-bun run once             # one real poll against Linear (needs `bun run login` done)
-bun run start            # dev daemon on http://localhost:4800
+bun run start            # dev daemon on http://localhost:4800 (data in the project folder)
+bun run once             # one real poll (needs a sign-in)
 bun run build            # standalone binaries + tarballs + checksums.txt in dist/
-tail -f logs/autopilot.log
+AUTOPILOT_HOME=$PWD/.dev/fresh bun src/cli.ts start   # a throwaway home: walks first-run setup
 ```
 
-The installed app (Homebrew, `brew services`) serves http://localhost:4747. From source the default
-port is 4800, the data lives in the project folder, and tracker sign-ins use their own Keychain
-entries (`<account>-dev`, see `oauthAccount`), so `bun run start` runs alongside it without
-touching its login. `src/cli.ts` is the single entry point, both from source and as the compiled
-binary.
+`src/cli.ts` is the single entry point, from source and as the compiled binary (`start`, `once`,
+`login [--force]`, `reset`, `update [--check]`, `open`, `service install|uninstall|restart|status`,
+`paths`, `version`).
+
+- **Installed app:** Homebrew (`brew install mrinalraj/tap/autopilot`) under `brew services`
+  (label `sh.brew.autopilot`) on http://localhost:4747. Its data is in
+  `~/Library/Application Support/autopilot/`, and its logs are at
+  `$(brew --prefix)/var/log/autopilot.log`.
+- **From source:** the default port is 4800, so `bun run start` runs alongside the installed app.
+  Data lives in the project folder, and tracker sign-ins use their own Keychain entries
+  (`<account>-dev`, see `oauthAccount`). Use `AUTOPILOT_HOME` for extra throwaway homes; `.dev/` is
+  git-ignored for that.
+- **Never `pkill -f "src/cli.ts start"`:** it also matches a real daemon started from source. Stop
+  the specific process instead.
 
 Config, state and logs live under `HOME_DIR` (`config.ts`):
 - `AUTOPILOT_HOME` if set
-- otherwise `~/Library/Application Support/autopilot` in the compiled binary
+- otherwise `~/Library/Application Support/autopilot` in the compiled binary. A
+  `linear-autopilot` folder there is renamed on first start.
 - otherwise the project folder when running from source.
 
 Never derive paths from `import.meta.dir` elsewhere: inside the binary it's Bun's virtual filesystem.
 
 ## Architecture
 
-- `autopilot.ts` is the orchestrator: detection (`detectAssignments`), triage (`processQueue` →
-  `triage`), `approve` / `reject`, `runLaunch`, and `refreshWork`.
-- SQLite (`db.ts`) is the single source of truth.
-  - `issues`: one row per proposed ticket. Status is `pending | approved | rejected | running | failed`.
-    `repo` / `repo_path` / `worktree_id` belong to the primary repo. `extra_repos_json` holds the
-    other repos (`ExtraRepo[]`, read with `Store.extras(row)`), each with its own `worktree_id` on
-    the same branch. `work_json` is `RepoWork[]`, primary first; read it with `Autopilot.work(row)`,
-    which also accepts the older single-object form.
-    `approved` means a launch is in flight. Dismissed tickets are `rejected`, with an `error`
-    starting with `Dismissed:`.
-  - `assignments`: eligibility tracking. Despite its name, `assigned = 1` means *currently eligible*
-    (assigned to me + in a pickup state), and `handled = 0` means queued for triage.
-  - `meta`: the poll cursor and `tracking_version`. Bump the version, with a migration in the
-    `Store` constructor, if the meaning of `assignments` changes.
-  - New columns are added with an `ALTER TABLE` guard in the `Store` constructor.
-- Briefs (`state/briefs/*.md`) are a read-only projection of an `issues` row, regenerated whole by
-  `writeBrief`. Never edit them in place.
-- Trackers sit behind `Tracker` (`tracker.ts`); `openTracker` (`connect.ts`) builds the configured
-  one (`cfg.tracker`). `linear.ts` and `jira.ts` talk to the hosted MCP servers (Linear's, and
-  Atlassian's at mcp.atlassian.com) over OAuth with tokens in the Keychain (`mcp.ts`). Many
-  workspaces forbid personal API keys, so don't add an API-key path. Tool results are JSON text.
-  Linear: `list_issues` truncates descriptions, so use `get_issue`. Jira: every tool needs the
-  site's cloudId; text is requested as Markdown but empty fields still come back as ADF (`adf.ts`);
-  JQL must be bounded, and naming a status the site lacks fails the whole query. Statuses use
-  Linear's type vocabulary (Jira's categories new/indeterminate/done map to
-  unstarted/started/completed). `linear_*` DB columns hold the active tracker's IDs and status.
-- First-run setup (`onboarding.ts`, `/setup`): repos → gh account (required) → tracker sign-in →
-  statuses → overview. Until `cfg.onboarded`, nothing polls: call `pollIfReady()` (not `poll()`)
-  from timers and web actions. The web layer writes settings through its `configPath` and reads
-  gh through its `gh` extra, so tests never touch the real config or gh.
-- Repos are `repoRoots` (parent folders) plus `repoPaths` (individual repos), combined in
-  `repoSources`; `loadConfig` migrates the old `reposRoot`/`repoMode`.
-- Each tracker has its own state dir (`state/` for Linear, `state/jira/` for Jira) and its own
-  pickup/import statuses (`jira.pickupStates` …), so ticket keys and briefs never mix. Switching
-  (`Autopilot.switchTracker`) swaps the store and client live and is refused mid-check or launch.
-- `web.ts` renders server-side HTML. Modals are CSS `:target` (`#m-<identifier>`). One nonce'd
-  inline script polls `/state` to update the progress banner, set the Dock badge
-  (`setAppBadge(awaiting)`), and reload when the `version` changes.
-- The PWA lives in `public/` and is served through the `STATIC` allowlist in `web.ts`. Only listed
-  paths are reachable. The service worker (`public/sw.js`) is network-only, apart from the cached
-  offline page: never cache pages, `/state` or anything carrying the CSRF token. Bump its `CACHE`
-  name when changing the offline page or icons.
+| Module | Role |
+| --- | --- |
+| `autopilot.ts` | Orchestrator: `poll` (`detectAssignments` → `importExisting` → `processQueue` → `triage`), `approve` / `reject`, `runLaunch`, `refreshWork`, `deleteWorktrees`, `sendBackToApproval`, `switchTracker`, `eraseAll`, sign-in/out |
+| `db.ts` | SQLite store (single source of truth) |
+| `tracker.ts` / `connect.ts` | `Tracker` interface, per-tracker specs (MCP URL, Keychain account, revoke URL, scope) / `openTracker(cfg)` |
+| `linear.ts` / `jira.ts` / `adf.ts` | Tracker clients over MCP / Atlassian rich text → Markdown |
+| `mcp.ts` / `login.ts` / `keychain.ts` | MCP session with reconnect + Keychain OAuth provider / browser sign-in and sign-out / Keychain access |
+| `triage.ts` / `llm.ts` / `branch.ts` / `brief.ts` | Prompts and validation / `claude -p` or Anthropic API / branch names / brief rendering |
+| `launch.ts` / `steps.ts` | Launchers, terminals, IDE chat, `runInTerminal` / per-ticket live step lines |
+| `work.ts` / `importer.ts` / `catalog.ts` | Commits + PRs per worktree / ticket IDs in worktree branches / repo catalog |
+| `web.ts` / `html.ts` / `settings-page.ts` / `onboarding.ts` / `pwa.ts` | Server-rendered pages, CSS + the one live script, Settings, `/setup`, PWA manifest/service worker/offline page |
+| `settings.ts` / `config.ts` | Config writes (`saveSettings`, `patchConfig`, `saveTracker`, `resetSettingsFile`, `addPicked`, `checkRepos`) / defaults, migration, paths |
+| `health.ts` / `notify.ts` / `update.ts` / `updater.ts` / `service.ts` / `reset.ts` | Setup banners / notifications / release checks and installs / LaunchAgent / CLI reset |
+
+### Data
+
+SQLite (`db.ts`) is the single source of truth.
+
+- **`issues`:** one row per ticket. Status is `pending | approved | rejected | running | failed`.
+  - `approved` means a launch is in flight. A launch can't survive a restart, so those become
+    `failed` on start.
+  - Dismissed tickets are `rejected`, with an `error` starting with `Dismissed:`.
+  - `repo` / `repo_path` / `worktree_id` belong to the primary repo. `extra_repos_json` holds the
+    others (`ExtraRepo[]`, read with `Store.extras(row)`), each with its own `worktree_id` on the
+    same branch.
+  - `work_json` is `RepoWork[]`, primary first; read it with `Autopilot.work(row)`.
+  - `worktree_id` is Supacode's ID form: the percent-encoded path (`supacodeId` / `pathFromId`).
+  - `linear_id`, `linear_state` and `linear_state_type` hold the *active tracker's* ID and status,
+    Jira's too. The column names are historical.
+- **`assignments`:** eligibility tracking. Despite its name, `assigned = 1` means *currently
+  eligible* (assigned to me and in a pickup status), and `handled = 0` means queued for triage.
+- **`meta`:** `poll_cursor`, `tracking_version` (bump it, with a migration in the `Store`
+  constructor, if the meaning of `assignments` changes), `csrf_token`, `dismissed_banners`, and
+  `github_account` (the account the last work check ran as).
+- **New columns:** add them with an `ALTER TABLE` guard in the `Store` constructor.
+- **Briefs** (`<stateDir>/briefs/*.md`) are a read-only projection of a row, regenerated whole by
+  `writeBrief`. Never edit them in place. VS Code/Cursor launches also copy the brief into the
+  worktree's git-excluded `.autopilot/` folder: the Claude extension won't run in an untrusted
+  workspace, and App Support isn't trusted.
+
+### Polling
+
+`poll` runs these steps in order:
+
+1. **`detectAssignments`.** On the first run (no cursor) it records what's eligible. With
+   `processExistingOnFirstRun` (default true) those tickets are queued for triage; otherwise they're
+   only recorded. After that, `updatedSince(cursor - 5 min)` picks up changes.
+2. **`importExisting`.** This runs *before* triage so a ticket with an existing worktree is never
+   proposed.
+   - It imports worktrees whose branch or folder names a ticket (`ticketIdFrom`, using
+     `ticketPrefixes`, else the tracker's team or project keys), plus my tickets in `importStates`.
+   - Imported rows are `running` and `markAssigned(…, handled = true)`. Some have no worktree
+     (`worktree_id` null, `repo` ""); UI and work tracking must cope.
+   - A `pending`/`failed` row whose worktree turns up moves to `running`.
+3. **`processQueue`.** It triages each queued ticket.
+
+Other polling rules:
+
+- **Phases** (`phaseOf`: in progress / in review / completed) come from the live tracker status
+  (refreshed with the work check) plus PR state. The DB status stays `running`.
+- **`refreshWork`** re-checks commits and PRs for `running` rows and skips settled ones (merged or
+  closed). It re-checks everything when the GitHub account differs from `meta.github_account`
+  (Settings change, or gh's active account switching when none is pinned).
+
+### Trackers
+
+- **Interface:** both trackers implement `Tracker` and are reached through their hosted MCP servers
+  with OAuth (DCR + PKCE). Tokens live in the Keychain: service `autopilot`, account
+  `linear-mcp-oauth` / `jira-mcp-oauth`, with `-dev` appended from source. Old `linear-autopilot`
+  service entries move over on first read.
+- **No API keys:** many workspaces forbid them. Don't add an API-key or API-token path.
+- **Status types:** they use Linear's vocabulary. Jira categories map `new` → `unstarted`,
+  `indeterminate` → `started`, `done` → `completed`, and `CLOSED_STATE_TYPES` is shared.
+- **Linear** (`https://mcp.linear.app/mcp`): `list_issues` truncates descriptions, so use
+  `get_issue`. Writes (moving a ticket to started) need the `write` scope.
+- **Jira Cloud** (`https://mcp.atlassian.com/v1/mcp`, verified against a live site). The served
+  tool names differ from Atlassian's docs:
+  - `getAccessibleAtlassianResources` gives the site's `cloudId`, which every other call needs.
+    `cfg.jira.site` picks the site when there are several.
+  - Searches use `searchJiraIssuesUsingJql` and paginate with `nextPageToken`.
+  - Tickets come from `getJiraIssue`. Comments come through its `comment` field; there's no
+    comments tool.
+  - Moving to started uses `getTransitionsForJiraIssue` + `transitionJiraIssue`. Projects come from
+    `getVisibleJiraProjects`.
+  - There's no statuses tool, so status pickers use statuses seen on recent tickets.
+- **Jira quirks:**
+  - It accepts `responseContentFormat: "markdown"`, but empty fields still arrive as ADF, so
+    everything goes through `toMarkdown`.
+  - JQL must be bounded.
+  - Naming a status the site lacks fails the whole query, so `mineInStates` queries one status at
+    a time and skips missing ones.
+  - `updatedSince` uses relative minutes plus `assignee WAS currentUser()`, which sidesteps the
+    user's timezone and catches unassignment.
+- **One tracker at a time:** each tracker has its own state dir (`state/` for Linear, `state/jira/`
+  for Jira) and its own pickup/import statuses (`jira.pickupStates`/`importStates`; Linear's are
+  top-level). `Autopilot.switchTracker` swaps the store and client live and is refused mid-check,
+  launch or sign-in.
+
+### Web
+
+- **Pages:** server-rendered HTML, no framework. Modals are CSS `:target` (`#m-<identifier>`).
+- **Live script:** one nonce'd inline script (`LIVE_SCRIPT` in `html.ts`) handles everything
+  client-side:
+  - polls `/state` for the progress banner, the Dock badge (`setAppBadge`), the live log panel
+    (`/events`) and page reloads (`version` or `boot` changing);
+  - handles busy buttons (`data-busy-label`);
+  - reloads when a sign-in finishes (`#signin-wait`).
+- **Security:** a host allowlist (anti DNS rebinding), a same-origin check on POST, and a CSRF
+  token kept in `meta` so pages survive restarts. A stale token redirects with "out of date".
+- **Redirects:** use `go(to, "error" | "notice", msg)` for banners, since some URLs already have a
+  query string.
+- **`startWeb` extras:** `updater`, `health`, `reschedule`, `configPath` and `gh`. Every settings
+  write goes through `configPath` and gh status through `gh`, so tests never touch the real config
+  or gh logins.
+- **First-run setup** (`onboarding.ts`, `/setup`): repos → gh account → tracker sign-in →
+  statuses → overview. `/` redirects there until `cfg.onboarded`.
+  - Nothing polls before then: timers and web actions call `pollIfReady()`, not `poll()`. Tests
+    call `poll()` directly.
+  - Configs from before setup existed count as onboarded. Settings → Run setup again, or Erase all
+    data with Also reset settings, sends you back through it.
+  - gh is required: the Homebrew formula depends on it, the gh banners are `required`, and setup
+    can't continue without an account. Its buttons open Terminal via `runInTerminal`
+    (`gh auth login`, `brew install gh`).
+- **Repos:** `repoRoots` (parent folders: every git repo directly inside) plus `repoPaths`
+  (individual repos), combined and de-duplicated in `repoSources`. Same-named repos get their
+  parent's name prepended. `loadConfig` migrates the old `reposRoot`/`repoMode`. **Choose in
+  Finder** runs `choose folder` via osascript (`chooseFolders`); `addPicked` files repos vs parent
+  folders.
+- **PWA:** the manifest, service worker and offline page are in `src/pwa.ts`; icons are in
+  `public/icons` and are embedded with `with { type: "file" }`. Only paths routed in `serveStatic`
+  are reachable.
+  - The service worker is network-only apart from the cached offline page. Never cache pages,
+    `/state` or anything carrying the CSRF token.
+  - Bump `CACHE` when changing the offline page or icons.
 
 ## Rules that are easy to break
 
@@ -82,47 +186,95 @@ Never derive paths from `import.meta.dir` elsewhere: inside the binary it's Bun'
   in briefs.
 - **CSP:** don't add inline scripts without the response nonce, inline event handlers, or external
   assets. Keep `Referrer-Policy: same-origin`: `no-referrer` makes browsers send `Origin: null`,
-  which the same-origin POST check rejects.
+  which the same-origin POST check rejects. Don't use `confirm()`/`alert()`; use a required
+  checkbox (see Erase all data).
 - **Claude launch command:** the prompt must come *before* `--add-dir`, because that option is
   variadic and swallows a following prompt. All directories (the briefs dir, then the extra
   worktrees) follow the one `--add-dir`. Tests in `test/e2e.test.ts` pin this.
-- **Multi-repo launch order:** extra worktrees first (in the background, each saved as soon as it's
-  made so a retry reuses it), then the primary, then the brief rewrite, then the tab.
+- **Multi-repo launch order:** all worktrees are created in parallel (`Promise.all`; extras in the
+  background), then saved to the row (a retry reuses them via `worktreeForBranch`), then the brief
+  is rewritten with their paths, then the session opens.
 - **Never pass Supacode's `--fetch`.** Supacode runs `/usr/bin/git`, whose credential helper isn't
   trusted for the github.com Keychain item, so the user gets a Keychain prompt on every launch. The
   daemon fetches with its own `git` instead (`fetchOrigin` in `launch.ts`).
 - **Supacode and Worktrunk own their worktrees,** so their hooks run. Only the git, VS Code and
-  Cursor launchers call `git worktree add` themselves. Read-only git (`worktree list`, `rev-list`,
-  `status`) is fine anywhere.
-- **Imported tickets** (`importExisting`) are `running` rows with `markAssigned(…, handled = true)`
-  so they're never triaged. Some have no worktree (`worktree_id` null, `repo` ""); UI and work
-  tracking must cope with that.
-- **Phases** (`phaseOf`) come from the live Linear status (`linear_state*`, refreshed with the work
-  check) plus PR state. The DB status stays `running`.
-- **Settings** write `config.json` through `saveSettings`, which keeps unknown keys and applies the
-  change in place (`Object.assign(cfg, loadConfig())`). The daemon's timers read the live config
-  through `reschedule()`.
-- **Bun reads the environment once at startup.** `Bun.spawn` and `Bun.which` ignore later changes to
-  `process.env` (such as `preparePath()` under launchd), so pass `env: process.env` and
-  `{ PATH: process.env.PATH }` explicitly.
+  Cursor launchers call `git worktree add`/`remove` themselves. Read-only git (`worktree list`,
+  `rev-list`, `status`) is fine anywhere.
+- **Worktrees are created and removed by the ticket's launcher** (`launcherFor(cfg, row.launcher)`).
+  Never `rm -rf` a worktree. Always re-check with `checkWork` and refuse on `atRisk` unless forced;
+  unknown state counts as at risk. Erasing data never touches worktrees or branches.
+- **Bun reads the environment once at startup.** `Bun.spawn` and `Bun.which` ignore later changes
+  to `process.env` (such as `preparePath()` under launchd), so always pass `env: process.env` and
+  `{ PATH: process.env.PATH }`. A missing `env` once broke triage on fresh Homebrew installs
+  ("Executable not found: claude"); `test/llm.test.ts` guards it.
 - **Secrets:** never write tokens or keys to files, logs, briefs or SQLite. Use `keychain.ts`, which
-  passes values to `security` over stdin as hex.
+  passes values to `security` over stdin as hex. The GitHub token for a pinned account
+  (`ghEnv`) stays in memory.
+- **Settings** write `config.json` through `saveSettings` / `patchConfig`, which keep unknown keys
+  and apply the change in place (`Object.assign(cfg, loadConfig(path))`). The daemon's timers read
+  the live config through `reschedule()`.
 - **Page refreshes:** anything that changes a row bumps `updated_at`, which reloads open pages. For
   periodic data (work checks), only bump on a material change (`setWork(…, bump)`).
-- **Worktrees are created and removed by the ticket's launcher** (`launcherFor(cfg, row.launcher)`
-  in `launch.ts`). Never `rm -rf` a worktree. Supacode-made ones must go through Supacode, and
-  `git worktree add`/`remove` is only for the git, VS Code and Cursor launchers. Always re-check with `checkWork` and refuse on `atRisk`
-  unless forced. Unknown state counts as at risk.
-- **Updates:** release asset names come from `scripts/build.sh` and `assetName()` in `update.ts`;
-  keep them in sync. Installs verify the SHA-256 and the new binary's reported version before
-  swapping, and never run without an explicit user action.
-- **Embedded files:** icons are imported `with { type: "file" }` in `src/pwa.ts`, so they ship
-  inside the binary. Add new static files the same way and route them in `serveStatic`.
+- **Long ticket actions** (send back, delete worktrees) run through `runInBackground`: the request
+  returns at once, the card shows the live step, and the result lands in `notes` and the log.
+- **Updates:**
+  - Release asset names come from `scripts/build.sh` and `assetName()`; keep them in sync.
+  - Every release so far is a GitHub *pre-release*, and `/releases/latest` skips those, so
+    `checkForUpdate` picks from the release list with `pickRelease`. Betas follow betas and
+    releases; release installs follow releases only.
+  - Standalone installs verify the SHA-256 and the new binary's version before swapping. Homebrew
+    installs run `brew upgrade autopilot` with `HOMEBREW_AUTO_UPDATE_SECS=0`, so the tap is fresh.
+  - Never install without an explicit user action.
+- **Renamed app:** keep the migrations (App Support folder, Keychain service, `BREW_LABELS`
+  including the old `linear-autopilot` labels, the tap's `formula_renames.json`) until there's a
+  reason to drop them.
+
+## Releasing
+
+All releases so far are pre-releases (`0.1.0-beta.N`); the latest is beta.8.
+
+1. **Branch and PR:** work on a feature branch and open a PR to `main` on GitHub. The PR is
+   squash-merged.
+2. **Version:** on `main`, bump `version` in `package.json`, commit, and make an annotated tag
+   `v<version>`. Push `main` and the tag. Never retag or force-push a pushed tag; ship the next
+   beta instead.
+3. **Build:** `bun run build`.
+4. **Publish:** `gh release create v<version> --repo mrinalraj/autopilot --prerelease` with the two
+   tarballs and `checksums.txt`.
+5. **Tap:** `scripts/brew-formula.sh` writes `packaging/autopilot.rb` (git-ignored). Copy it to
+   `Formula/autopilot.rb` in github.com/mrinalraj/homebrew-tap and push.
+6. **Upgrade:** users get it with `brew update && brew upgrade autopilot && brew services restart
+   autopilot`, or through the in-app banner.
+
+GitHub accounts on this machine:
+
+- **`mrinalraj`** (personal) owns the repo and the tap. Git uses the SSH alias `github-personal`,
+  with repo-local email raj.mrnl@gmail.com.
+- **`mrinalraj1`** is the work account and must stay gh's active account. For gh calls on this
+  repo, pass `GH_TOKEN=$(gh auth token -u mrinalraj)` instead of switching. A direnv `.envrc` does
+  this in interactive shells, but Claude Code's shell doesn't load it.
+- **`private-history`** (local branch) holds the pre-public history with employer details. Never
+  push it.
+
+## Environment gotchas (Claude Code's shell)
+
+- Every command prints `setValueForKeyFakeAssocArray: command not found: _encode`. It's gvm's `cd`
+  override missing helpers in Claude Code's shell snapshot. It's harmless; filter it with
+  `grep -v AssocArray`.
+- The shell is zsh: unquoted `$VAR` isn't word-split (use `while read` loops), unquoted heredocs
+  expand backticks (quote the delimiter), and `wc -l` pads its output with spaces.
 
 ## Conventions
 
 - Match the existing style: small modules, early returns, terse comments that explain *why*.
-- Comments: no ticket numbers (e.g. no "(ENG-1234)").
-- Tests live in `test/`. Use the fakes there (`FakeLinear`, `FakeLLM`, `fake-supacode.sh`) rather
-  than real services. Set `AUTOPILOT_NOTIFY=off` in tests.
+- Comments: no ticket numbers (no "(ENG-1234)"), and keep them compact before committing.
+- Tests live in `test/`. Use the fakes rather than real services:
+  - trackers: `FakeLinear` in `e2e.test.ts`, `FakeJira` in `fake-jira.ts`, built from recorded
+    Atlassian responses;
+  - the LLM: `FakeLLM`;
+  - Supacode: `fake-supacode.sh`;
+  - web tests: `configPath`/`gh` extras on `startWeb`.
+
+  Set `AUTOPILOT_NOTIFY=off`. Configs in tests use `repoRoots: [...]`, and `onboarded: true`
+  wherever `/` must render.
 - Commit only when the user asks, and never force-push.
