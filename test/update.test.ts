@@ -12,10 +12,10 @@ let sums = "";
 let u: typeof import("../src/update");
 
 beforeAll(async () => {
-  // A fake new release: a "binary" that reports 9.9.9.
+  // A fake new beta: a "binary" that reports 9.9.9-beta.2.
   const pkg = join(dir, "pkg");
   Bun.spawnSync(["mkdir", "-p", pkg]);
-  writeFileSync(join(pkg, "autopilot"), "#!/bin/sh\necho 9.9.9\n");
+  writeFileSync(join(pkg, "autopilot"), "#!/bin/sh\necho 9.9.9-beta.2\n");
   chmodSync(join(pkg, "autopilot"), 0o755);
   Bun.spawnSync(["tar", "-C", pkg, "-czf", join(dir, "rel.tar.gz"), "autopilot"]);
   tarball = new Uint8Array(readFileSync(join(dir, "rel.tar.gz")));
@@ -23,23 +23,30 @@ beforeAll(async () => {
   process.env.AUTOPILOT_UPDATE_API = `http://localhost:${port}`;
   process.env.AUTOPILOT_UPDATE_REPO = "me/app";
   u = await import("../src/update");
-  const name = u.assetName("9.9.9");
+  const name = u.assetName("9.9.9-beta.2");
   sums = `${createHash("sha256").update(tarball).digest("hex")}  ${name}\n`;
 
   server = Bun.serve({
     port,
     fetch(req) {
       const path = new URL(req.url).pathname;
-      if (path === "/repos/me/app/releases/latest") {
-        return Response.json({
-          tag_name: "v9.9.9",
-          html_url: "https://example.test/rel",
-          body: "notes",
-          assets: [
-            { name, browser_download_url: `http://localhost:${port}/dl/${name}` },
-            { name: "checksums.txt", browser_download_url: `http://localhost:${port}/dl/checksums.txt` },
-          ],
-        });
+      // Like GitHub: /releases/latest skips pre-releases, so with only betas it's a 404.
+      if (path === "/repos/me/app/releases/latest") return new Response("not found", { status: 404 });
+      if (path === "/repos/me/app/releases") {
+        return Response.json([
+          { tag_name: "v9.9.10-beta.1", draft: true, prerelease: true, html_url: "x", assets: [] },
+          {
+            tag_name: "v9.9.9-beta.2",
+            prerelease: true,
+            html_url: "https://example.test/rel",
+            body: "notes",
+            assets: [
+              { name, browser_download_url: `http://localhost:${port}/dl/${name}` },
+              { name: "checksums.txt", browser_download_url: `http://localhost:${port}/dl/checksums.txt` },
+            ],
+          },
+          { tag_name: "v9.9.9-beta.1", prerelease: true, html_url: "x", assets: [] },
+        ]);
       }
       if (path === `/dl/${name}`) return new Response(Bun.file(join(dir, "rel.tar.gz")));
       if (path === "/dl/checksums.txt") return new Response(sums);
@@ -68,8 +75,8 @@ test("version comparison", () => {
 test("finds the newer release and this machine's asset", async () => {
   const info = (await u.checkForUpdate())!;
   expect(info.available).toBe(true);
-  expect(info.latest).toBe("9.9.9");
-  expect(info.assetUrl).toContain(u.assetName("9.9.9"));
+  expect(info.latest).toBe("9.9.9-beta.2"); // the newest non-draft beta, though /releases/latest is a 404
+  expect(info.assetUrl).toContain(u.assetName("9.9.9-beta.2"));
   expect(info.kind).toBe("source"); // tests run from source
 });
 
@@ -80,11 +87,19 @@ test("standalone install verifies the checksum and swaps the binary in place", a
   const info = (await u.checkForUpdate())!;
 
   await u.installStandalone(info, target);
-  expect(Bun.spawnSync([target, "version"]).stdout.toString().trim()).toBe("9.9.9");
+  expect(Bun.spawnSync([target, "version"]).stdout.toString().trim()).toBe("9.9.9-beta.2");
 
   // A tampered download is refused and the installed binary is left alone.
   writeFileSync(target, "#!/bin/sh\necho 0.1.0\n");
-  sums = `${"0".repeat(64)}  ${u.assetName("9.9.9")}\n`;
+  sums = `${"0".repeat(64)}  ${u.assetName("9.9.9-beta.2")}\n`;
   await expect(u.installStandalone(info, target)).rejects.toThrow("checksum mismatch");
   expect(Bun.spawnSync([target, "version"]).stdout.toString().trim()).toBe("0.1.0");
+});
+
+test("betas follow betas; a release install only follows releases", () => {
+  const rel = (tag: string, extra: object = {}) => ({ tag_name: tag, html_url: tag, ...extra });
+  const list = [rel("v0.2.0-beta.1", { prerelease: true }), rel("v0.1.0"), rel("v0.3.0", { draft: true }), rel("v0.1.0-beta.9", { prerelease: true })];
+  expect(u.pickRelease(list, "0.1.0-beta.7")?.tag_name).toBe("v0.2.0-beta.1");
+  expect(u.pickRelease(list, "0.1.0")?.tag_name).toBe("v0.1.0");
+  expect(u.pickRelease([], "0.1.0-beta.7")).toBeNull();
 });
