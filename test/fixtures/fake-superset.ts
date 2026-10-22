@@ -1,5 +1,5 @@
 // Copied into a test's temp directory with an absolute Bun shebang. Never calls Superset.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const root = dirname(process.argv[1]);
@@ -27,6 +27,19 @@ const git = (path: string, ...argv: string[]) => {
   const p = Bun.spawnSync(["git", "-C", path, ...argv], { stdout: "pipe", stderr: "pipe", env: process.env });
   if (p.exitCode) die(p.stderr.toString());
 };
+// Separate fake CLI processes must not read partially created Git worktree metadata.
+async function withWorktreeLock(projectId: string, action: () => void) {
+  const lock = join(root, `worktree-${projectId}.lock`), deadline = Date.now() + 5000;
+  for (;;) {
+    try { mkdirSync(lock); break; }
+    catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if (Date.now() > deadline) die("timed out waiting for fixture worktree lock");
+      await Bun.sleep(5);
+    }
+  }
+  try { action(); } finally { rmdirSync(lock); }
+}
 let result: any;
 switch (command) {
   case "auth whoami": result = { organizationId: "test-organization", userId: "test-user" }; break;
@@ -44,8 +57,10 @@ switch (command) {
     if (!project) die("missing project");
     const branch = flag("--branch");
     const path = join(root, "worktrees", project.name, branch);
-    const hasBranch = Bun.spawnSync(["git", "-C", project.path, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`]).exitCode === 0;
-    git(project.path, "worktree", "add", "-q", ...(hasBranch ? [path, branch] : ["-b", branch, path, args.includes("--base-branch") ? flag("--base-branch") : "main"]));
+    await withWorktreeLock(project.id, () => {
+      const hasBranch = Bun.spawnSync(["git", "-C", project.path, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`]).exitCode === 0;
+      git(project.path, "worktree", "add", "-q", ...(hasBranch ? [path, branch] : ["-b", branch, path, args.includes("--base-branch") ? flag("--base-branch") : "main"]));
+    });
     const workspace = { id: crypto.randomUUID(), projectId: project.id, type: "worktree", branch,
       worktreePath: path, worktreeExists: true, archivedAt: null };
     save("workspaces", workspace);

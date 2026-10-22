@@ -1,4 +1,4 @@
-import { workOf, worktreesOf, explainerOf, ticketOf, needsTriage, usesLauncher } from "../domain/issues";
+import { workOf, worktreesOf, explainerOf, ticketOf, needsTriage, usesLauncher, type Explainer } from "../domain/issues";
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { baseUrl, HOME_DIR, type Config } from "../config/config";
@@ -24,6 +24,14 @@ const GITHUB_KEY = "github_account";
 const CURSOR_OVERLAP_MS = 5 * 60_000;
 
 export { phaseOf, type Phase } from "../domain/issues";
+
+export interface TriageEdit {
+  summary: string;
+  approach: string;
+  likelyAreas: string;
+  size: string;
+  expected: string;
+}
 
 /** Assigned to me, open, and in one of the configured pickup states. */
 export function isEligible(cfg: Config, assigneeId: string | null, stateName: string, stateType: string, me: string): boolean {
@@ -540,6 +548,36 @@ export class Autopilot {
     await notify({ title: `${issue.identifier}: ${issue.title}`, message: explainer.summary, openUrl: approvalUrl, group: issue.identifier });
   }
 
+  /** Persist human corrections and refresh the brief without changing the ticket workflow. */
+  saveTriage(identifier: string, input: TriageEdit): { ok: true; message: string } | { ok: false; error: string } {
+    const row = this.store.getIssueByIdentifier(identifier);
+    if (!row) return { ok: false, error: "unknown issue" };
+    if (row.status === "approved" || launchSteps.has(identifier) || this.progress.current === identifier) {
+      return { ok: false, error: "This ticket is busy. Save your edits after its current action finishes." };
+    }
+    if (input.expected !== row.explainer_json) return { ok: false, error: "The triage changed since you opened this form. Copy your edits and reload the ticket before saving." };
+    const summary = input.summary.trim(), approach = input.approach.trim();
+    if (!summary) return { ok: false, error: "Summary is required." };
+    if (summary.length > 10_000 || approach.length > 20_000 || input.likelyAreas.length > 10_000) {
+      return { ok: false, error: "Keep the summary and likely areas under 10,000 characters, and the approach under 20,000." };
+    }
+    if (!["S", "M", "L"].includes(input.size)) return { ok: false, error: "Choose a size: S, M or L." };
+    const likely_areas = [...new Set(input.likelyAreas.split(/\r?\n/).map((area) => area.trim()).filter(Boolean))];
+    if (likely_areas.length > 100) return { ok: false, error: "Use at most 100 likely areas, one per line." };
+    const explainer: Explainer = { summary, approach, likely_areas, size: input.size as Explainer["size"] };
+    try {
+      this.store.db.transaction(() => {
+        // Editing wording must not change approval eligibility, routing or existing work.
+        this.store.updateIssue(row.linear_id, { explainer_json: JSON.stringify(explainer) });
+        writeBrief(this.store.getIssue(row.linear_id)!);
+      })();
+      return { ok: true, message: `${identifier}: triage and ticket brief saved.` };
+    } catch (err) {
+      log.error(`could not save triage for ${identifier}`, err);
+      return { ok: false, error: "Could not save the triage and brief. Your changes are still in the form; check the activity log and try again." };
+    }
+  }
+
   /** Explicitly triage imported work, bypassing the automatic pickup-state filter. */
   startTriage(identifier: string): { ok: true } | { ok: false; error: string } {
     const row = this.store.getIssueByIdentifier(identifier);
@@ -583,10 +621,11 @@ export class Autopilot {
   }
 
   /** Validates page edits, saves them and rewrites the brief, then launches in the background. */
-  approve(identifier: string, repoName: string, branchInput: string, extraNames: string[] = []): { ok: true } | { ok: false; error: string } {
+  approve(identifier: string, repoName: string, branchInput: string, extraNames: string[] = [], triage?: TriageEdit): { ok: true } | { ok: false; error: string; expected?: string } {
     const row = this.store.getIssueByIdentifier(identifier);
     if (!row) return { ok: false, error: "unknown issue" };
     if (launchSteps.has(identifier)) return { ok: false, error: "this ticket is busy; try again when its current action finishes" };
+    if (row.status !== "pending" && row.status !== "failed") return { ok: false, error: `cannot approve an item in status "${row.status}"` };
     const catalog = this.catalog();
     const repo = catalog.find((r) => r.name === repoName);
     if (!repo) return { ok: false, error: `unknown repo "${repoName}"` };
@@ -603,6 +642,11 @@ export class Autopilot {
     const branch = normalizeBranch(branchInput.trim(), row.identifier, row.title);
     if (!isValidBranch(branch, row.identifier)) return { ok: false, error: `invalid branch "${branch}"` };
 
+    // Approval from ticket details saves the current draft even if Update wasn't clicked.
+    if (triage) {
+      const saved = this.saveTriage(identifier, triage);
+      if (!saved.ok) return saved;
+    }
     if (!this.store.transition(row.linear_id, ["pending", "failed"], "approved")) {
       return { ok: false, error: `cannot approve an item in status "${row.status}"` };
     }
@@ -612,7 +656,7 @@ export class Autopilot {
       writeBrief(updated);
     } catch (err) {
       this.store.updateIssue(row.linear_id, { status: "failed", error: `could not write brief: ${(err as Error).message}` });
-      return { ok: false, error: (err as Error).message };
+      return { ok: false, error: (err as Error).message, ...(triage ? { expected: updated.explainer_json } : {}) };
     }
 
     void this.runLaunch(updated);

@@ -99,6 +99,12 @@ SQLite (`src/storage/db.ts`) is the single source of truth.
   `writeBrief`. Never edit them in place. VS Code/Cursor launches also copy the brief into the
   worktree's git-excluded `.autopilot/` folder: the Claude extension won't run in an untrusted
   workspace, and App Support isn't trusted.
+- **Triage editing:** `saveTriage` changes only `explainer_json` and refreshes the brief. Compare the
+  submitted original explainer to reject stale forms; refuse edits during ticket actions. Preserve
+  `triage_source` because it controls eligibility. Brief writes use an atomic replacement, and an
+  unsuccessful write rolls back the database edit. The browser retains drafts when saving fails.
+  The existing triage box is the edit form; its Update button saves only triage. Modal launch
+  controls share that form, and `approve` saves submitted triage before transitioning or launching.
 
 ### Polling
 

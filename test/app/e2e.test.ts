@@ -8,6 +8,7 @@ import { Autopilot } from "../../src/app/autopilot";
 import type { Tracker, TrackerIssue as LinearIssue } from "../../src/trackers/tracker";
 import type { JsonRequest, LLM } from "../../src/triage/llm";
 import { worktreeId } from "../../src/workspaces/launch";
+import { handleAction } from "../../src/web/routes/actions";
 
 const ME = "user-me";
 const dir = mkdtempSync(join(tmpdir(), "autopilot-e2e-"));
@@ -118,14 +119,25 @@ test("a newly assigned ticket becomes a pending item with a brief", async () => 
   expect(brief).toContain("- Branch: `widget-fix-eng-2`");
 });
 
-test("approve writes edits to the brief and launches via Supacode", async () => {
-  const res = ap.approve("ENG-2", "backend", "Better Widget Fix");
-  expect(res).toEqual({ ok: true });
+test("approve saves unsaved triage from the form before launching via Supacode", async () => {
+  const before = store.getIssueByIdentifier("ENG-2")!;
+  const form = new FormData();
+  for (const [name, value] of Object.entries({ expected: before.explainer_json, summary: "Keep the existing API compatible",
+    approach: "Update the handler and add regression coverage", likelyAreas: "src/handler.ts\ntest/handler.test.ts", size: "M",
+    repo: "backend", branch: "Better Widget Fix", response: "json" })) form.set(name, value);
+  const res = await handleAction("/issues/ENG-2/approve", form, {
+    ap, configPath: join(dir, "config.json"), gh: () => ({ installed: false, accounts: [] }), csrf: "fixture", bootId: "fixture",
+  });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ ok: true, location: "/?logs=1" });
+  expect(JSON.parse(store.getIssueByIdentifier("ENG-2")!.explainer_json).summary).toBe("Keep the existing API compatible");
   await waitFor(() => store.getIssueByIdentifier("ENG-2")!.status !== "approved");
   const row = store.getIssueByIdentifier("ENG-2")!;
   expect(row.status).toBe("running");
   expect(row.branch).toBe("better-widget-fix-eng-2");
   expect(readFileSync(row.brief_path, "utf8")).toContain("- Branch: `better-widget-fix-eng-2`");
+  expect(readFileSync(row.brief_path, "utf8")).toContain("Keep the existing API compatible");
+  expect(readFileSync(row.brief_path, "utf8")).toContain("Update the handler and add regression coverage");
   const calls = readFileSync(scLog, "utf8");
   expect(calls).toContain("repo worktree-new -r " + worktreeId(join(reposRoot, "backend")) + " --branch better-widget-fix-eng-2");
   // Prompt first: --add-dir is variadic and would otherwise swallow the prompt.

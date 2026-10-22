@@ -213,4 +213,12 @@ ul { margin:0; padding-left:18px; } li { margin:2px 0; }
 .cols { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); gap:16px; }
 .box { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:14px; }
 .actionsbar { display:flex; gap:8px; margin-top:18px; }
+.triage-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.triage-heading label { display:flex; align-items:center; gap:6px; margin:0; font:inherit; }
+.triage-heading select { width:auto; padding:2px 6px; }
+.triage-editor textarea { display:block; field-sizing:content; min-height:3em; resize:vertical; padding:4px; border-color:transparent; background:transparent; }
+.triage-editor textarea:hover { border-color:var(--border); }
+.triage-editor textarea:focus { outline:2px solid var(--accent); outline-offset:1px; background:var(--inset); }
+.triage-editor textarea[name=likelyAreas] { font:12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.triage-text { white-space:pre-wrap; }
 @media (max-width: 860px) { .cols { grid-template-columns:minmax(0,1fr); } .modal .panel { margin:0; width:100%; max-height:100vh; border-radius:0; } }
