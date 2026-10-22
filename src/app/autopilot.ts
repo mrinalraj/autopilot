@@ -1,4 +1,4 @@
-import { workOf, worktreesOf, explainerOf, ticketOf } from "../domain/issues";
+import { workOf, worktreesOf, explainerOf, ticketOf, needsTriage, usesLauncher } from "../domain/issues";
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { baseUrl, HOME_DIR, type Config } from "../config/config";
@@ -9,7 +9,7 @@ import { loadCatalog, type RepoEntry } from "../repos/catalog";
 import { explain, resolveRepo } from "../triage/triage";
 import { briefPath, initPrompt, removeBrief, snapshot, writeBrief } from "../triage/brief";
 import { isValidBranch, normalizeBranch } from "../triage/branch";
-import { launcherFor, pathFromId, resendIdePrompt, supacodeId, supacodeWorktreePaths } from "../workspaces/launch";
+import { launcherFor, pathFromId, worktreeId, type Launcher, type SessionRequest } from "../workspaces/launch";
 import { scanWorktrees, type FoundWorktree } from "../repos/importer";
 import { browserLogin, signOut } from "./login";
 import { launchSteps, step, withTicket } from "./steps";
@@ -117,6 +117,7 @@ export class Autopilot {
     this.lastPollError = null;
     this.notes.clear();
     log.info(`now watching ${this.trackerLabel}`);
+    this.reconfigureLaunchers();
     return { ok: true };
   }
 
@@ -129,6 +130,72 @@ export class Autopilot {
     return loadCatalog(this.cfg);
   }
 
+  /** A settings change must not swap adapters underneath an in-flight ticket operation. */
+  get launcherBusy(): boolean { return launchSteps.size > 0; }
+
+  /** Apply the selection once per ticket; the daemon retries unfinished setup independently. */
+  reconfigureLaunchers(): number {
+    let started = 0;
+    for (const row of this.store.listByStatus(["pending", "failed", "running", "rejected"], -1)) {
+      if (usesLauncher(row, this.cfg.launch.launcher) || launchSteps.has(row.identifier)) continue;
+      if (!worktreesOf(row).length) {
+        this.recordLauncher(row, this.cfg.launch.launcher);
+        continue;
+      }
+      const result = this.runInBackground(row.identifier, `Configuring ${this.cfg.launch.launcher}…`, async () => {
+        try {
+          await this.adoptTicket(this.store.getIssue(row.linear_id)!, launcherFor(this.cfg));
+        } catch (err) {
+          return { ok: false, error: `${(err as Error).message} Launcher setup will retry automatically.` };
+        }
+        return { ok: true, message: `${row.identifier} now uses ${this.cfg.launch.launcher}.` };
+      });
+      if (result.ok) started++;
+    }
+    return started;
+  }
+
+  /** Worktrees stay at their current paths and on their current branches, including dirty ones. */
+  private async adoptTicket(row: IssueRow, launcher: Launcher): Promise<void> {
+    for (const w of worktreesOf(row)) {
+      const path = pathFromId(w.worktreeId);
+      if (existsSync(path)) await launcher.adoptWorktree(w.repoPath, path, w.branch ?? row.branch);
+    }
+    this.recordLauncher(this.store.getIssue(row.linear_id)!, launcher.name);
+  }
+
+  private recordLauncher(row: IssueRow, name: string) {
+    if (!usesLauncher(row, name)) {
+      this.store.updateIssue(row.linear_id, { launcher: name,
+        extra_repos_json: JSON.stringify(Store.extras(row).map((e) => e.worktree_id ? { ...e, launcher: name } : e)) });
+    }
+  }
+
+  private existingSession(row: IssueRow): SessionRequest {
+    if (!row.worktree_id) throw new Error("no worktree is recorded for this ticket");
+    const others = Store.extras(row).flatMap((e) => e.worktree_id ? [{ repo: e.repo, path: pathFromId(e.worktree_id) }] : []);
+    const primaryPath = pathFromId(row.worktree_id);
+    if ([primaryPath, ...others.map((o) => o.path)].some((path) => !existsSync(path))) throw new Error("a ticket worktree is missing; restore it before opening a session");
+    return { identifier: row.identifier, briefPath: row.brief_path, primaryPath, others,
+      otherPaths: others.map((o) => o.path), prompt: initPrompt(row.brief_path, others),
+      addDirs: [this.cfg.briefsDir, ...others.map((o) => o.path)], background: this.cfg.launch.background };
+  }
+
+  /** Send the prompt using today's selection, regardless of which tool created the worktree. */
+  resendPrompt(identifier: string) {
+    const row = this.store.getIssueByIdentifier(identifier);
+    if (!row?.worktree_id || row.status !== "running") return { ok: false as const, error: "this ticket has no running worktree" };
+    const launcher = launcherFor(this.cfg);
+    if (!launcher.resendPrompt) return { ok: false as const, error: "the selected launcher does not support resending a chat prompt" };
+    return this.runInBackground(identifier, "Sending prompt…", async () => {
+      const req = this.existingSession(row);
+      await this.adoptTicket(row, launcher);
+      writeBrief(this.store.getIssue(row.linear_id)!);
+      await launcher.resendPrompt!(req);
+      return { ok: true, message: `${identifier}: sent the prompt with ${launcher.name}.` };
+    });
+  }
+
   private async userId(): Promise<string> {
     this.me ??= (this.cfg.tracker === "linear" && this.cfg.linearUserId) || (await this.tracker.viewer()).id;
     return this.me;
@@ -139,8 +206,9 @@ export class Autopilot {
   }
 
   /** Drops a pending item whose ticket stopped being eligible (moved on, or reassigned). */
-  private dismissIfPending(linearId: string, reason: string) {
+  private dismissIfPending(linearId: string, reason: string, pickupOnly = false) {
     const row = this.store.getIssue(linearId);
+    if (row?.triage_source === "manual" && pickupOnly) return;
     if (!row || !this.store.transition(linearId, ["pending"], "rejected")) return;
     this.store.updateIssue(linearId, { error: `Dismissed: ${reason}` });
     removeBrief(row.brief_path);
@@ -179,12 +247,9 @@ export class Autopilot {
         const prev = Autopilot.work(row);
         if (isSettled(prev) && !only && !everything) continue;
         try {
-          const repos = [
-            { repo: row.repo, repoPath: row.repo_path, worktreeId: row.worktree_id },
-            ...Store.extras(row).flatMap((e) => (e.worktree_id ? [{ repo: e.repo, repoPath: e.repo_path, worktreeId: e.worktree_id }] : [])),
-          ];
+          const repos = Autopilot.worktrees(row);
           const work: RepoWork[] = [];
-          for (const r of repos) work.push({ repo: r.repo, ...(await checkWork(r.worktreeId, r.repoPath, row.branch, this.cfg.githubUser)) });
+          for (const r of repos) work.push({ repo: r.repo, ...(await checkWork(r.worktreeId, r.repoPath, r.branch ?? row.branch, this.cfg.githubUser)) });
           await this.refreshLinearState(row);
           const changed = !prev || workFingerprint(prev) !== workFingerprint(work);
           this.store.setWork(row.linear_id, JSON.stringify(work), changed);
@@ -252,7 +317,6 @@ export class Autopilot {
     const wanted = new Set(found.keys());
     if (this.cfg.importStates.length) for (const r of await this.tracker.mineInStates(this.cfg.importStates)) wanted.add(r.identifier);
 
-    const supacodePaths = await supacodeWorktreePaths(this.cfg);
     const imported: string[] = [];
     // Awaiting approval (or failed) here, but already started elsewhere: track the existing worktrees instead.
     for (const [identifier, wts] of found) {
@@ -265,9 +329,9 @@ export class Autopilot {
         repo: primary.repo,
         repo_path: primary.repoPath,
         branch: primary.branch,
-        worktree_id: supacodeId(primary.path),
-        extra_repos_json: JSON.stringify(others.map((w): ExtraRepo => ({ repo: w.repo, repo_path: w.repoPath, reason: "", worktree_id: supacodeId(w.path) }))),
-        launcher: supacodePaths.has(primary.path) ? "supacode" : "git",
+        worktree_id: worktreeId(primary.path),
+        extra_repos_json: JSON.stringify(others.map((w): ExtraRepo => ({ repo: w.repo, repo_path: w.repoPath, reason: "", worktree_id: worktreeId(w.path), branch: w.branch }))),
+        launcher: null,
       });
       this.store.markHandled(row.linear_id);
       writeBrief(this.store.getIssue(row.linear_id)!);
@@ -293,22 +357,23 @@ export class Autopilot {
         repo_path: primary?.repoPath ?? "",
         branch: primary?.branch ?? issue.gitBranchName ?? issue.identifier.toLowerCase(),
         confidence: 1,
+        triage_source: null,
         resolve_reason: wts.length ? `Imported from existing worktree${wts.length > 1 ? "s" : ""}` : `Imported from ${this.trackerLabel} (${issue.state.name}); no worktree found`,
         status: "running",
         error: null,
-        worktree_id: primary ? supacodeId(primary.path) : null,
+        worktree_id: primary ? worktreeId(primary.path) : null,
         ticket_json: snapshotJson,
         explainer_json: JSON.stringify({ summary: summary || "Imported ticket.", approach: "", likely_areas: [], size: "" }),
         extra_repos_json: JSON.stringify(
-          others.map((w): ExtraRepo => ({ repo: w.repo, repo_path: w.repoPath, reason: "", worktree_id: supacodeId(w.path) })),
+          others.map((w): ExtraRepo => ({ repo: w.repo, repo_path: w.repoPath, reason: "", worktree_id: worktreeId(w.path), branch: w.branch })),
         ),
       });
       this.store.updateIssue(issue.id, {
-        launcher: primary && supacodePaths.has(primary.path) ? "supacode" : "git",
+        launcher: null,
         linear_state: issue.state.name,
         linear_state_type: issue.state.type,
       });
-      this.store.markAssigned(issue.id, issue.identifier, true); // never triage an imported ticket
+      this.store.markAssigned(issue.id, issue.identifier, true); // imported tickets only triage on request
       writeBrief(this.store.getIssue(issue.id)!);
       imported.push(issue.identifier);
       await this.refreshWork(issue.id);
@@ -339,6 +404,7 @@ export class Autopilot {
         return [] as string[];
       });
       await this.processQueue();
+      this.reconfigureLaunchers();
       log.info(`${this.trackerLabel} check done in ${((Date.now() - started) / 1000).toFixed(1)}s: ${queued} to triage, ${imported.length} imported`);
       this.lastPollError = null;
     } catch (err) {
@@ -362,13 +428,16 @@ export class Autopilot {
     if (!cursor) {
       // First run: baseline what's already eligible so the backlog doesn't flood the queue.
       const eligibleIds = new Set<string>();
-      for (const ref of await this.tracker.assignedToMe()) {
+      const assigned = await this.tracker.assignedToMe();
+      for (const ref of assigned) {
         if (!this.eligible(ref.assigneeId, ref.stateName, ref.stateType, me)) continue;
         eligibleIds.add(ref.id);
         this.store.markAssigned(ref.id, ref.identifier, !this.queueExisting());
       }
       for (const row of this.store.listByStatus(["pending"])) {
-        if (!eligibleIds.has(row.linear_id)) this.dismissIfPending(row.linear_id, `not assigned to me in ${this.pickupLabel()}`);
+        const ref = assigned.find((r) => r.id === row.linear_id);
+        const pickupOnly = !!ref && ref.assigneeId === me && !CLOSED_STATE_TYPES.has(ref.stateType);
+        if (!eligibleIds.has(row.linear_id)) this.dismissIfPending(row.linear_id, `not assigned to me in ${this.pickupLabel()}`, pickupOnly);
       }
       const verb = this.queueExisting() ? "queued" : "baselined";
       this.queueExistingOnce = false;
@@ -384,10 +453,11 @@ export class Autopilot {
         if (seen?.assigned) continue;
         this.store.markAssigned(ref.id, ref.identifier, false);
         log.info(`${ref.identifier} is now assigned to me in "${ref.stateName}"`);
-      } else if (seen?.assigned) {
+      } else {
         // No longer eligible, so becoming eligible again later counts as new.
-        this.store.markUnassigned(ref.id);
-        this.dismissIfPending(ref.id, ref.assigneeId === me ? `moved to "${ref.stateName}"` : "reassigned");
+        if (seen?.assigned) this.store.markUnassigned(ref.id);
+        const pickupOnly = ref.assigneeId === me && !CLOSED_STATE_TYPES.has(ref.stateType);
+        this.dismissIfPending(ref.id, ref.assigneeId === me ? `moved to "${ref.stateName}"` : "reassigned", pickupOnly);
       }
     }
     this.store.setMeta(CURSOR_KEY, startedAt);
@@ -470,10 +540,53 @@ export class Autopilot {
     await notify({ title: `${issue.identifier}: ${issue.title}`, message: explainer.summary, openUrl: approvalUrl, group: issue.identifier });
   }
 
+  /** Explicitly triage imported work, bypassing the automatic pickup-state filter. */
+  startTriage(identifier: string): { ok: true } | { ok: false; error: string } {
+    const row = this.store.getIssueByIdentifier(identifier);
+    if (!row) return { ok: false, error: "unknown issue" };
+    if (!needsTriage(row)) return { ok: false, error: "this ticket has already been triaged or is awaiting approval" };
+    return this.runInBackground(identifier, "Fetching ticket for triage…", async () => {
+      const issue = await this.tracker.issue(row.linear_id);
+      if (!issue) return { ok: false, error: "ticket not found in the tracker" };
+      const catalog = this.catalog();
+      if (!catalog.length) throw new Error("no git repos found in the folders in Settings → Repos");
+      const hasWorktrees = worktreesOf(row).length > 0;
+      step(hasWorktrees ? "Preparing triage for the existing worktree…" : "Choosing repos and a branch…");
+      const resolution = hasWorktrees ? null : await resolveRepo(this.llm, issue, catalog);
+      const repo = catalog.find((r) => resolution ? r.name === resolution.repo : r.path === row.repo_path);
+      if (!repo) throw new Error(`add the existing repo ${row.repo_path} in Settings → Repos before triaging`);
+      step("Writing the ticket explainer…");
+      const explainer = await explain(this.llm, issue, repo);
+      const fresh = this.store.getIssue(row.linear_id);
+      if (!fresh || !needsTriage(fresh) || fresh.worktree_id !== row.worktree_id || fresh.extra_repos_json !== row.extra_repos_json) {
+        return { ok: false, error: "the ticket changed while triaging; try again" };
+      }
+      const pending = !hasWorktrees && !CLOSED_STATE_TYPES.has(issue.state.type);
+      // Save only after both model calls succeed. Preserve worktree ownership and live PR checks.
+      this.store.db.transaction(() => {
+        this.store.updateIssue(row.linear_id, {
+          title: issue.title, url: issue.url, ticket_json: JSON.stringify(snapshot(issue, this.trackerLabel)),
+          linear_state: issue.state.name, linear_state_type: issue.state.type,
+          explainer_json: JSON.stringify(explainer), triage_source: "manual", error: null,
+          status: pending ? "pending" : "running",
+          ...(resolution ? {
+            repo: repo.name, repo_path: repo.path, branch: resolution.branch, confidence: resolution.confidence,
+            resolve_reason: resolution.reason, launcher: null,
+            extra_repos_json: JSON.stringify(resolution.extra.map((e): ExtraRepo => ({ ...e, worktree_id: null }))),
+          } : {}),
+        });
+        writeBrief(this.store.getIssue(row.linear_id)!);
+        this.store.markHandled(row.linear_id);
+      })();
+      return { ok: true, message: pending ? `${identifier} is triaged and ready in Awaiting approval.` : `${identifier}'s explainer and brief are ready.` };
+    });
+  }
+
   /** Validates page edits, saves them and rewrites the brief, then launches in the background. */
   approve(identifier: string, repoName: string, branchInput: string, extraNames: string[] = []): { ok: true } | { ok: false; error: string } {
     const row = this.store.getIssueByIdentifier(identifier);
     if (!row) return { ok: false, error: "unknown issue" };
+    if (launchSteps.has(identifier)) return { ok: false, error: "this ticket is busy; try again when its current action finishes" };
     const catalog = this.catalog();
     const repo = catalog.find((r) => r.name === repoName);
     if (!repo) return { ok: false, error: `unknown repo "${repoName}"` };
@@ -517,8 +630,7 @@ export class Autopilot {
 
   private async launchSteps(row: IssueRow) {
     try {
-      // A retry keeps the launcher that already made some of the worktrees.
-      const launcher = launcherFor(this.cfg, row.launcher);
+      const launcher = launcherFor(this.cfg);
       this.store.updateIssue(row.linear_id, { launcher: launcher.name });
       const extras = Store.extras(row);
       step(`Preparing ${extras.length + 1} worktree${extras.length ? "s" : ""} on ${row.branch}`);
@@ -527,9 +639,9 @@ export class Autopilot {
         launcher.ensureWorktree(row.repo_path, row.branch, this.cfg.launch.background),
         ...extras.map((e) => launcher.ensureWorktree(e.repo_path, row.branch, true)),
       ]);
-      extras.forEach((e, i) => (e.worktree_id = supacodeId(extraPaths[i])));
+      extras.forEach((e, i) => Object.assign(e, { worktree_id: worktreeId(extraPaths[i]), launcher: launcher.name, branch: row.branch }));
       const others = extras.map((e, i) => ({ repo: e.repo, path: extraPaths[i] }));
-      this.store.updateIssue(row.linear_id, { worktree_id: supacodeId(primaryPath), extra_repos_json: JSON.stringify(extras) });
+      this.store.updateIssue(row.linear_id, { worktree_id: worktreeId(primaryPath), extra_repos_json: JSON.stringify(extras) });
       writeBrief(this.store.getIssue(row.linear_id)!);
 
       await launcher.openSession({
@@ -563,7 +675,7 @@ export class Autopilot {
   static worktrees = worktreesOf;
 
   /**
-   * Deletes a ticket's worktrees through Supacode. Re-checks each one first and refuses, unless
+   * Deletes a ticket's worktrees through the selected launcher. Re-checks each one first and refuses, unless
    * `force`, when any has uncommitted changes or unpushed commits. PR tracking carries on.
    */
   async deleteWorktrees(identifier: string, force: boolean): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
@@ -573,18 +685,20 @@ export class Autopilot {
     if (!wts.length) return { ok: false, error: "no worktrees to delete" };
 
     step("Checking the worktrees for unsaved work…");
-    const checks = await Promise.all(wts.map(async (w) => ({ ...w, work: await checkWork(w.worktreeId, w.repoPath, row.branch, this.cfg.githubUser) })));
+    const checks = await Promise.all(wts.map(async (w) => ({ ...w, work: await checkWork(w.worktreeId, w.repoPath, w.branch ?? row.branch, this.cfg.githubUser) })));
     const live = checks.filter((c) => !c.work.missing);
     if (!live.length) return { ok: false, error: "the worktrees are already gone" };
     const risks = live.flatMap((c) => atRisk(c.work).map((r) => `${c.repo}: ${r}`));
     if (risks.length && !force) return { ok: false, error: `not deleted, it would lose ${risks.join(", ")}; tick "delete anyway" to confirm` };
 
+    const launcher = launcherFor(this.cfg);
+    if (!usesLauncher(row, launcher.name)) await this.adoptTicket(row, launcher);
+
     const failed: string[] = [];
-    const launcher = launcherFor(this.cfg, row.launcher ?? "supacode");
     for (const c of live) {
       try {
         step(`Removing the worktree in ${c.repo}…`);
-        await launcher.removeWorktree(c.repoPath, c.work.worktreePath, row.branch, force);
+        await launcher.removeWorktree(c.repoPath, c.work.worktreePath, c.branch ?? row.branch, force);
         log.info(`${row.identifier}: deleted worktree ${c.work.worktreePath}`);
       } catch (err) {
         failed.push(`${c.repo}: ${(err as Error).message}`);
@@ -640,14 +754,14 @@ export class Autopilot {
     if (!["running", "failed"].includes(row.status)) return { ok: false, error: `only launched tickets can be sent back (this one is ${row.status})` };
     if (!row.repo) return { ok: false, error: "this ticket was imported without a repo; there's no triage to go back to" };
 
-    const live = (await Promise.all(Autopilot.worktrees(row).map(async (w) => ({ ...w, work: await checkWork(w.worktreeId, w.repoPath, row.branch) }))))
+    const live = (await Promise.all(Autopilot.worktrees(row).map(async (w) => ({ ...w, work: await checkWork(w.worktreeId, w.repoPath, w.branch ?? row.branch) }))))
       .filter((c) => !c.work.missing);
     if (live.length) {
       const res = await this.deleteWorktrees(identifier, force);
       if (!res.ok) return res;
     }
     const fresh = this.store.getIssue(row.linear_id)!;
-    const extras = Store.extras(fresh).map((e) => ({ ...e, worktree_id: null }));
+    const extras = Store.extras(fresh).map(({ launcher, branch, ...e }) => ({ ...e, worktree_id: null }));
     this.store.updateIssue(row.linear_id, { status: "pending", error: null, worktree_id: null, launcher: null, extra_repos_json: JSON.stringify(extras) });
     this.store.db.query("UPDATE issues SET work_json = NULL WHERE linear_id = ?").run(row.linear_id);
     writeBrief(this.store.getIssue(row.linear_id)!);
@@ -699,29 +813,6 @@ export class Autopilot {
     await this.tracker.resetAuth();
     this.me = null;
     this.statusCache = null;
-  }
-
-  /** Sends a VS Code/Cursor ticket's prompt to the editor's chat again (after trusting its folder). */
-  async resendPrompt(identifier: string): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
-    const row = this.store.getIssueByIdentifier(identifier);
-    if (!row?.worktree_id || (row.launcher !== "vscode" && row.launcher !== "cursor")) return { ok: false, error: "not a VS Code/Cursor launch" };
-    const others = Store.extras(row).flatMap((e) => (e.worktree_id ? [{ repo: e.repo, path: pathFromId(e.worktree_id) }] : []));
-    try {
-      await resendIdePrompt(this.cfg, row.launcher, {
-        identifier: row.identifier,
-        briefPath: row.brief_path,
-        others,
-        primaryPath: pathFromId(row.worktree_id),
-        otherPaths: others.map((o) => o.path),
-        prompt: "",
-        addDirs: [],
-        background: false,
-      });
-      log.info(`${identifier}: sent the prompt to the ${row.launcher === "vscode" ? "VS Code" : "Cursor"} chat again`);
-      return { ok: true, message: `Sent ${identifier}'s prompt to the chat; press Enter there to start.` };
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
   }
 
   reject(identifier: string): { ok: true } | { ok: false; error: string } {

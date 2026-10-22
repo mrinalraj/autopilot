@@ -15,6 +15,7 @@
     "reset": "bun run src/cli.ts reset",
     "cli": "bun run src/cli.ts",
     "build": "scripts/build.sh",
+    "changelog": "bun scripts/changelog.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { loadConfig } from "../../src/config/config";
-import { supacodeId } from "../../src/domain/worktree";
+import { worktreeId } from "../../src/domain/worktree";
 import { ticketComponents } from "../../src/web/views/components/tickets";
 import { renderPage } from "../../src/web/views/layout";
 import { csrfField } from "../../src/web/views/forms";
@@ -10,7 +10,7 @@ import { issue, work } from "../fixtures/issues";
 const data = (): TicketViewData => ({
   cfg: loadConfig("/nonexistent"), trackerLabel: "Linear", tokenField: csrfField("test-token"),
   catalog: [{ name: "api", path: "/code/api", description: "API", topLevel: [] }, { name: "web", path: "/code/web", description: "UI", topLevel: [] }],
-  steps: new Map(), notes: new Map(), worktreeLinks: new Map(),
+  steps: new Map(), notes: new Map(), worktreeLinks: new Map(), canResendPrompt: false,
 });
 
 test("ticket templates render snapshots without a database, launcher or HTTP server", () => {
@@ -29,10 +29,11 @@ test("ticket templates render snapshots without a database, launcher or HTTP ser
 
 test("running multi-repo tickets use supplied links and expose safety warnings", () => {
   const snapshot = data();
+  snapshot.canResendPrompt = true;
   snapshot.worktreeLinks = new Map([["ticket-1", new Map([["/work/api", "vscode://file/work/api"]])]]);
   const row = issue({
-    status: "running", launcher: "vscode", worktree_id: supacodeId("/work/api"),
-    extra_repos_json: JSON.stringify([{ repo: "web", repo_path: "/code/web", reason: "UI", worktree_id: supacodeId("/work/web") }]),
+    status: "running", launcher: "vscode", worktree_id: worktreeId("/work/api"),
+    extra_repos_json: JSON.stringify([{ repo: "web", repo_path: "/code/web", reason: "UI", worktree_id: worktreeId("/work/web") }]),
     work_json: JSON.stringify([
       work({ dirtyFiles: 2, pr: { number: 12, url: "https://example.test/pr/12", state: "OPEN", isDraft: false, title: "Fix API" } }),
       work({ repo: "web", worktreePath: "/work/web", unpushed: 1 }),
@@ -45,6 +46,8 @@ test("running multi-repo tickets use supplied links and expose safety warnings",
   expect(modal(row)).toContain("api: 2 uncommitted files");
   expect(modal(row)).toContain("web: 1 unpushed commit");
   expect(modal(row)).toContain('name="force"');
+  expect(modal({ ...row, launcher: "superset" })).toContain("using the selected launcher");
+  expect(modal({ ...row, launcher: "superset" })).not.toContain("through Supacode");
 });
 
 test("launch steps and imported tickets without worktrees render from data alone", () => {
@@ -66,4 +69,23 @@ test("page layout embeds CSS and exactly one nonce-bearing executable browser sc
   expect(html.match(/<script/g)).toHaveLength(1);
   const script = html.match(/<script nonce="test-nonce">([\s\S]*?)<\/script>/)![1];
   expect(() => new Function(script)).not.toThrow(); // parse only, never execute in the test process
+});
+
+test("tickets omit manual triage, session and launcher setup controls while retaining setup progress and errors", () => {
+  const snapshot = data();
+  const row = issue({ status: "running", triage_source: null, repo: "", repo_path: "" });
+  const views = ticketComponents(snapshot);
+  const existing = { ...row, worktree_id: worktreeId("/work/api"), repo: "api", launcher: "supacode" };
+  snapshot.cfg.launch.launcher = "superset";
+  for (const ticket of [row, existing, { ...existing, triage_source: "automatic" as const }, { ...existing, linear_state_type: "completed" }]) {
+    for (const html of [views.workCard(ticket), views.modal(ticket)]) {
+      for (const action of ["triage", "open-session", "configure-launcher"]) expect(html).not.toContain(`/issues/ENG-1/${action}`);
+    }
+  }
+  snapshot.steps = new Map([[row.identifier, "Configuring superset…"]]);
+  expect(views.workCard(existing)).toContain("Configuring superset…");
+  expect(views.modal(existing)).toContain("Configuring superset…");
+  snapshot.steps = new Map();
+  snapshot.notes = new Map([[row.identifier, { level: "error", msg: "<Host unavailable> Launcher setup will retry automatically." }]]);
+  expect(views.modal(existing)).toContain("&lt;Host unavailable&gt; Launcher setup will retry automatically.");
 });

@@ -21,6 +21,7 @@
   },
   "launch": {
     "supacodeBin": "/Applications/supacode.app/Contents/Resources/bin/supacode",
+    "supersetBin": "superset",
     "claudeBin": "claude",
     "fetch": true,
     "base": "",

@@ -1,3 +1,3 @@
-/** Worktree IDs retain Supacode's percent-encoded path format for every launcher. */
-export const supacodeId = (path: string) => encodeURIComponent(path.endsWith("/") ? path : path + "/");
+/** Provider-independent identity. Preserve the existing encoded-path format for stored tickets. */
+export const worktreeId = (path: string) => encodeURIComponent(path.endsWith("/") ? path : path + "/");
 export const pathFromId = (id: string) => decodeURIComponent(id).replace(/\/$/, "");

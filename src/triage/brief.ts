@@ -29,7 +29,7 @@ export const briefPath = (briefsDir: string, identifier: string) => join(briefsD
 /** `others` are the extra repos' worktrees, already added to the session with --add-dir. */
 export function initPrompt(path: string, others: { repo: string; path: string }[] = []): string {
   const multi = others.length
-    ? `This ticket spans several repos, all on the same branch. You start in the primary repo's worktree; the others are ${others
+    ? `This ticket spans several repos. You start in the primary repo's worktree; the others are ${others
         .map((o) => `${o.repo} at ${o.path}`)
         .join(" and ")}. Make the changes each repo needs there, and open one PR per repo. `
     : "";

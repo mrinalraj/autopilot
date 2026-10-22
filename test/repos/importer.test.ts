@@ -74,7 +74,7 @@ test("imports worktree tickets (grouped across repos) and In Development tickets
   expect(a.status).toBe("running");
   expect([a.repo, Store.extras(a).map((e) => e.repo)]).toEqual(["api", ["web"]]);
   expect(a.branch).toBe("fix-thing-eng-42");
-  expect(a.launcher).toBe("git");
+  expect(a.launcher).toBeNull(); // adopted by the selected launcher after discovery
   expect(Autopilot.work(a)?.map((w) => w.repo)).toEqual(["api", "web"]);
   expect(phaseOf(a, Autopilot.work(a))).toBe("in-review");
 
@@ -120,7 +120,7 @@ test("Linear status changes move a ticket between phases", async () => {
 });
 
 test("git launcher creates, reuses and removes worktrees in the configured folder", async () => {
-  const l = launcherFor(cfg, "git");
+  const l = launcherFor({ ...cfg, launch: { ...cfg.launch, launcher: "git" } });
   const repo = join(reposRoot, "api");
   const path = await l.ensureWorktree(repo, "new-work-eng-77", false);
   expect(path).toBe(join(dir, "made", "api", "new-work-eng-77"));

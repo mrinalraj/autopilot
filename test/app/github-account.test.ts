@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { loadConfig } from "../../src/config/config";
 import { Store } from "../../src/storage/db";
 import { Autopilot } from "../../src/app/autopilot";
-import { supacodeId } from "../../src/workspaces/launch";
+import { worktreeId } from "../../src/workspaces/launch";
 import type { LLM } from "../../src/triage/llm";
 import type { Tracker } from "../../src/trackers/tracker";
 
@@ -22,7 +22,7 @@ test("a different GitHub account re-checks settled tickets too", async () => {
   store.upsertIssue({
     linear_id: "x", identifier: "ENG-1", title: "Done thing", url: "u", brief_path: join(dir, "ENG-1.md"), repo: "api", repo_path: repo,
     branch: "done-thing-eng-1", confidence: 1, resolve_reason: "", status: "running", error: null,
-    worktree_id: supacodeId(join(dir, "gone")), ticket_json: "{}", explainer_json: "{}", extra_repos_json: "[]",
+    worktree_id: worktreeId(join(dir, "gone")), ticket_json: "{}", explainer_json: "{}", extra_repos_json: "[]",
   });
   // Settled: its only PR is merged, so routine checks skip it.
   const merged = JSON.stringify([{ repo: "api", missing: true, pr: { number: 7, url: "u", state: "MERGED", isDraft: false, title: "t" } }]);

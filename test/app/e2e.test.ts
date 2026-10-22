@@ -7,7 +7,7 @@ import { Store } from "../../src/storage/db";
 import { Autopilot } from "../../src/app/autopilot";
 import type { Tracker, TrackerIssue as LinearIssue } from "../../src/trackers/tracker";
 import type { JsonRequest, LLM } from "../../src/triage/llm";
-import { supacodeId } from "../../src/workspaces/launch";
+import { worktreeId } from "../../src/workspaces/launch";
 
 const ME = "user-me";
 const dir = mkdtempSync(join(tmpdir(), "autopilot-e2e-"));
@@ -82,7 +82,7 @@ beforeAll(() => {
     mkdirSync(join(reposRoot, name), { recursive: true });
     Bun.spawnSync(["git", "init", "-q", join(reposRoot, name)]);
   }
-  process.env.FAKE_SC_REPOS = supacodeId(join(reposRoot, "backend"));
+  process.env.FAKE_SC_REPOS = worktreeId(join(reposRoot, "backend"));
   cfg = { ...loadConfig("/nonexistent"), repoRoots: [reposRoot], stateDir: join(dir, "state"), briefsDir: join(dir, "state", "briefs") };
   cfg.launch = { ...cfg.launch, supacodeBin: join(import.meta.dir, "../fixtures/fake-supacode.sh"), fetch: false };
   // Importing existing work has its own test; keep it out of the pickup flow tested here.
@@ -127,9 +127,9 @@ test("approve writes edits to the brief and launches via Supacode", async () => 
   expect(row.branch).toBe("better-widget-fix-eng-2");
   expect(readFileSync(row.brief_path, "utf8")).toContain("- Branch: `better-widget-fix-eng-2`");
   const calls = readFileSync(scLog, "utf8");
-  expect(calls).toContain("repo worktree-new -r " + supacodeId(join(reposRoot, "backend")) + " --branch better-widget-fix-eng-2");
+  expect(calls).toContain("repo worktree-new -r " + worktreeId(join(reposRoot, "backend")) + " --branch better-widget-fix-eng-2");
   // Prompt first: --add-dir is variadic and would otherwise swallow the prompt.
-  expect(calls).toContain(`tab new -w %2Ftmp%2Fwt%2Fbackend%2Fbetter-widget-fix-eng-2%2F --title ENG-2 claude -i claude 'Read the ticket brief at ${row.brief_path} and implement it. The ticket`);
+  expect(calls).toContain(`tab new -w %2Ftmp%2Fwt%2Fbackend%2Fbetter-widget-fix-eng-2%2F --title ENG-2 claude -i 'claude' 'Read the ticket brief at ${row.brief_path} and implement it. The ticket`);
   expect(calls).toMatch(/before editing code\.' --add-dir '[^']+briefs'\n/);
   expect(ap.approve("ENG-2", "backend", "x")).toEqual({ ok: false, error: 'cannot approve an item in status "running"' });
 });
@@ -208,8 +208,8 @@ test("a multi-repo ticket gets a worktree per repo and one session with the othe
 
   const calls = readFileSync(scLog, "utf8").slice(before);
   // A worktree per repo (created in parallel; the extra one in the background), then one tab in the primary.
-  expect(calls).toContain(`repo worktree-new -r ${supacodeId(join(reposRoot, "frontend"))} --branch widget-everywhere-eng-6 --timeout 300 --background`);
-  expect(calls).toContain(`repo worktree-new -r ${supacodeId(join(reposRoot, "backend"))} --branch widget-everywhere-eng-6`);
+  expect(calls).toContain(`repo worktree-new -r ${worktreeId(join(reposRoot, "frontend"))} --branch widget-everywhere-eng-6 --timeout 300 --background`);
+  expect(calls).toContain(`repo worktree-new -r ${worktreeId(join(reposRoot, "backend"))} --branch widget-everywhere-eng-6`);
   expect(calls.indexOf("tab new")).toBeGreaterThan(calls.lastIndexOf("repo worktree-new"));
   expect(calls).toContain("tab new -w %2Ftmp%2Fwt%2Fbackend%2Fwidget-everywhere-eng-6%2F");
   expect(calls).toContain("the others are frontend at /tmp/wt/frontend/widget-everywhere-eng-6.");
@@ -236,7 +236,7 @@ test("delete worktrees refuses to lose work unless forced, then removes them via
 
   const done = await ap.deleteWorktrees("ENG-7", true);
   expect(done).toEqual({ ok: true, message: "Deleted 1 worktree for ENG-7." });
-  expect(readFileSync(scLog, "utf8")).toContain(`worktree delete -w ${supacodeId(wt)} --background`);
+  expect(readFileSync(scLog, "utf8")).toContain(`worktree delete -w ${worktreeId(wt)} --background`);
   expect(existsSync(wt)).toBe(false);
   expect(Autopilot.work(store.getIssueByIdentifier("ENG-7")!)?.[0].missing).toBe(true);
   expect(await ap.deleteWorktrees("ENG-7", true)).toEqual({ ok: false, error: "the worktrees are already gone" });

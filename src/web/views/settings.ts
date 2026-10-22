@@ -32,6 +32,7 @@ export function settingsBody(d: SettingsData): string {
   const repos = d.repos;
   const launchers: [string, string][] = [
     ["supacode", "Supacode: worktree and Claude tab in Supacode"],
+    ["superset", "Superset: worktree and Claude terminal in Superset"],
     ["worktrunk", "Worktrunk: wt switch --create (with its hooks), Claude in your terminal"],
     ["git", "git worktree: plain git worktrees, Claude in your terminal"],
     ["vscode", "VS Code: git worktrees opened in VS Code, Claude in its chat panel (or a terminal)"],
@@ -95,6 +96,7 @@ export function settingsBody(d: SettingsData): string {
       <section class="box"><h3>Launch</h3>
         <label for="launcher">Launcher</label>
         <select id="launcher" name="launcher">${launchers.map(([v, l]) => `<option value="${v}"${selected(cfg.launch.launcher === v)}>${esc(l)}</option>`).join("")}</select>
+        <p class="muted small">Applies to new and existing tickets. Existing worktrees are registered with the selected tool in place, keeping their paths, branches and files. Setup retries automatically until complete.</p>
         <div class="pair"><div><label for="terminal">Terminal for Claude (Worktrunk, git, or editors set to Terminal)</label>
           <select id="terminal" name="terminal">
             <option value="terminal"${selected(cfg.launch.terminal === "terminal")}>Terminal (new tab)</option>

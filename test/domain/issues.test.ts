@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { phaseOf, workOf, worktreesOf, issueExtras } from "../../src/domain/issues";
-import { supacodeId, pathFromId } from "../../src/domain/worktree";
+import { worktreeId, pathFromId } from "../../src/domain/worktree";
 import { issue, work } from "../fixtures/issues";
 
 test("legacy work JSON and current multi-repo snapshots normalize without I/O", () => {
@@ -21,9 +21,9 @@ test("ticket phase is a shared rule independent of the view and store", () => {
 });
 
 test("worktree identities preserve spaces and collect primary and secondary repos", () => {
-  const primary = supacodeId("/code/my repo");
+  const primary = worktreeId("/code/my repo");
   expect(pathFromId(primary)).toBe("/code/my repo");
-  const extra = { repo: "web", repo_path: "/code/web", reason: "UI", worktree_id: supacodeId("/work/web") };
+  const extra = { repo: "web", repo_path: "/code/web", reason: "UI", worktree_id: worktreeId("/work/web") };
   const row = issue({ worktree_id: primary, extra_repos_json: JSON.stringify([extra]) });
   expect(issueExtras(row)).toEqual([extra]);
   expect(worktreesOf(row)).toEqual([

@@ -16,7 +16,7 @@ src/
   trackers/               # Linear/Jira clients, MCP transport and OAuth provider
   triage/                 # LLM routing/explaining, branches, brief files and template
   repos/                  # catalog, existing-work import, folder suggestions
-  workspaces/             # launchers and read-only git/GitHub work inspection
+  workspaces/             # launcher registry/types, provider adapters, CLI/git helpers and work inspection
   platform/               # macOS, Keychain, environment and external-tool adapters
   updates/                # release checking, installation and update state
   shared/                 # logging
@@ -88,6 +88,14 @@ validates the HTTP callback, and `web/views/auth.ts` renders its response. Ticke
 | Editor/terminal/worktree integration | `workspaces/launch.ts` |
 | Brief Markdown layout | `triage/brief-template.ts` |
 | SQLite migration/query | `storage/db.ts` |
+
+Launcher adapters implement `workspaces/types.ts` and register in `workspaces/launch.ts`. The
+selected launcher controls links, sessions, retries and cleanup for every ticket. Stored launcher
+names record adoption progress; they never choose an adapter. Settings changes and startup adopt
+existing worktrees in place without running setup or starting sessions. Keep provider commands,
+registration and deep links inside the adapter; core workflows discover worktrees through git.
+The daemon retries unfinished adoption every 30 seconds independently of tracker polling. Stored
+adoption markers skip completed work, including after restarts; no manual setup action is needed.
 
 Do not add a new abstraction for every function. Keep related behavior together, and extract when
 there is a real boundary (rendering versus I/O, shared rules versus service calls).

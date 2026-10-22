@@ -34,7 +34,7 @@ export const LOG_PATH = BREW_PREFIX ? join(BREW_PREFIX, "var", "log", "autopilot
 
 import { TRACKER_KINDS, TRACKERS, type TrackerKind } from "../trackers/tracker";
 
-export const LAUNCHERS = ["supacode", "worktrunk", "git", "vscode", "cursor"] as const;
+export const LAUNCHERS = ["supacode", "superset", "worktrunk", "git", "vscode", "cursor"] as const;
 export type LauncherName = (typeof LAUNCHERS)[number];
 
 export interface Config {
@@ -101,6 +101,8 @@ export interface Config {
     /** Where the git, vscode and cursor launchers put worktrees. Default: <first repo folder>/wt, else ~/worktrees */
     worktreesDir: string;
     supacodeBin: string;
+    /** Superset CLI on PATH, or an absolute path. Uses the local host only. */
+    supersetBin: string;
     claudeBin: string;
     fetch: boolean;
     base: string;
@@ -143,6 +145,7 @@ const DEFAULTS: Config = {
     cursorChat: "cursor",
     worktreesDir: "",
     supacodeBin: "/Applications/supacode.app/Contents/Resources/bin/supacode",
+    supersetBin: "superset",
     claudeBin: "claude",
     fetch: true,
     base: "",
@@ -183,7 +186,7 @@ export function loadConfig(path = CONFIG_PATH): Config {
   cfg.launch.worktreesDir = cfg.launch.worktreesDir
     ? expandHome(cfg.launch.worktreesDir)
     : cfg.repoRoots[0] ? join(cfg.repoRoots[0], "wt") : join(homedir(), "worktrees");
-  if (!LAUNCHERS.includes(cfg.launch.launcher)) cfg.launch.launcher = "supacode";
+  if (!LAUNCHERS.includes(cfg.launch.launcher)) cfg.launch.launcher = "git";
   return cfg;
 }
 

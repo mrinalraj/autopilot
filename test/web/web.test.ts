@@ -149,6 +149,7 @@ test("settings shows the Linear account section (signed out here)", async () => 
   expect(html).toContain("Sign in to Linear");
   expect(html).toContain('value="test-account"');
   expect(html).toContain(join(dir, "settings.json"));
+  expect(html).toContain('value="superset"');
 });
 
 test("rejects foreign Host headers (DNS rebinding)", async () => {

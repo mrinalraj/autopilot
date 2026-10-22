@@ -123,7 +123,7 @@ function start(d: SetupData): string {
   const { cfg } = d;
   const minutes = Math.round(cfg.pollIntervalSeconds / 60);
   const picks = cfg.pickupStates.length ? cfg.pickupStates.map((s) => `“${esc(s)}”`).join(" or ") : "any open status";
-  const launcher = { supacode: "Supacode", worktrunk: "Worktrunk", git: "git", vscode: "VS Code", cursor: "Cursor" }[cfg.launch.launcher];
+  const launcher = { supacode: "Supacode", superset: "Superset", worktrunk: "Worktrunk", git: "git", vscode: "VS Code", cursor: "Cursor" }[cfg.launch.launcher];
   return `<h2>How it works</h2>
     <ol class="how">
       <li><strong>Watches ${esc(d.trackerLabel)}</strong> every ${minutes} minutes for tickets assigned to you in ${picks}.</li>

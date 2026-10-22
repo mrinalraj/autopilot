@@ -9,7 +9,7 @@ import type { WebContext } from "../context";
 import type { DashboardData } from "../models";
 
 /** Gather state once per request; templates only receive the resulting snapshot. */
-export function dashboardData(ctx: WebContext, error?: string, notice?: string): DashboardData {
+export async function dashboardData(ctx: WebContext, error?: string, notice?: string): Promise<DashboardData> {
   const { ap, updater, health } = ctx;
   const queue = ap.store.listByStatus(["pending", "failed"]);
   const launching = ap.store.listByStatus(["approved"]);
@@ -20,21 +20,24 @@ export function dashboardData(ctx: WebContext, error?: string, notice?: string):
   const inReview = running.filter((row) => phaseOf(row, workOf(row)) === "in-review");
   const completed = running.filter((row) => phaseOf(row, workOf(row)) === "completed");
   const prsOpen = [...inProgress, ...inReview].flatMap((row) => workOf(row) ?? []).filter((w) => w.pr?.state === "OPEN").length;
+  const launcher = launcherFor(ap.cfg);
   const worktreeLinks = new Map<string, Map<string, string | null>>();
-  for (const row of rows) {
-    const launcher = launcherFor(ap.cfg, row.launcher ?? "supacode");
+  await Promise.all(rows.map(async (row) => {
     const paths = new Set([
       ...worktreesOf(row).map((w) => pathFromId(w.worktreeId)),
       ...(workOf(row) ?? []).map((w) => w.worktreePath),
     ]);
-    worktreeLinks.set(row.linear_id, new Map([...paths].map((path) => [path, launcher.link(path)])));
-  }
+    const links = await Promise.all([...paths].map(async (path) => {
+      return [path, await launcher.link(path)] as const;
+    }));
+    worktreeLinks.set(row.linear_id, new Map(links));
+  }));
   return {
     cfg: structuredClone(ap.cfg), trackerLabel: ap.trackerLabel,
     // An empty dashboard needs no repo choices (nor a filesystem/catalog scan).
     catalog: rows.length ? ap.catalog() : [],
     queue, launching, inProgress, inReview, completed, prsOpen, rejected, worktreeLinks,
-    steps: new Map(launchSteps), notes: new Map(ap.notes),
+    steps: new Map(launchSteps), notes: new Map(ap.notes), canResendPrompt: !!launcher.resendPrompt,
     health: health ? { items: [...health.items] } : undefined,
     dismissed: ap.store.dismissedBanners(),
     updater: updater ? { info: updater.info, status: updater.status, error: updater.error } : undefined,
