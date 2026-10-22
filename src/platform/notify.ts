@@ -1,4 +1,5 @@
 import { log } from "../shared/log";
+import { desktopEvent, isDesktop } from "./desktop";
 
 let notifierPath: string | null | undefined;
 
@@ -35,6 +36,10 @@ export async function notify(opts: { title: string; message: string; openUrl: st
   if (process.env.AUTOPILOT_NOTIFY === "off") return;
   const title = plain(opts.title, 120);
   const message = plain(opts.message, 300) || "New ticket";
+  if (isDesktop()) {
+    desktopEvent({ type: "notification", ...opts, title, message });
+    return;
+  }
   const notifier = findNotifier();
   if (notifier) {
     const err = await run([notifier, "-title", title, "-message", message, "-open", opts.openUrl, "-group", opts.group]);

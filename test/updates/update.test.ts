@@ -72,6 +72,20 @@ test("version comparison", () => {
   expect(u.newer("v0.1.0-beta.1", "0.1.0-beta.1")).toBe(false);
 });
 
+test("app bundles are distinct from standalone and formula installs", () => {
+  expect(u.installKind("/Applications/Autopilot.app/Contents/Helpers/autopilot", true)).toBe("desktop");
+  expect(u.installKind("/Users/me/Applications/Autopilot.app/Contents/Helpers/autopilot", true)).toBe("desktop");
+  expect(u.installKind("/opt/homebrew/Cellar/autopilot/1/bin/autopilot", true)).toBe("homebrew");
+  expect(u.installKind("/usr/local/bin/autopilot", true)).toBe("standalone");
+  expect(u.installKind("/usr/local/bin/bun", false)).toBe("source");
+});
+
+test("updating a desktop install cannot replace its signed helper", async () => {
+  const info = { ...(await u.checkForUpdate())!, kind: "desktop" as const };
+  await expect(u.applyUpdate(info)).rejects.toThrow("brew upgrade --cask autopilot");
+  await expect(u.installStandalone(info, "/Applications/Autopilot.app/Contents/Helpers/autopilot")).rejects.toThrow("bundled executables cannot be replaced");
+});
+
 test("finds the newer release and this machine's asset", async () => {
   const info = (await u.checkForUpdate())!;
   expect(info.available).toBe(true);

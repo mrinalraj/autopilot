@@ -8,6 +8,8 @@ export function expandHome(p: string): string {
 
 /** True inside a `bun build --compile` binary, where sources live in Bun's virtual filesystem. */
 export const COMPILED = import.meta.url.includes("$bunfs") || import.meta.dir.includes("~BUN");
+/** Also works when the bundled CLI is reached through Homebrew's symlink. */
+export const APP_BUNDLE = COMPILED ? process.execPath.match(/^(.*\.app)\/Contents\/Helpers\/autopilot$/)?.[1] ?? null : null;
 
 /**
  * Where config.json, state/ and logs/ live: AUTOPILOT_HOME if set, Application Support for the
@@ -30,7 +32,9 @@ function appSupport(): string {
 export const CONFIG_PATH = process.env.AUTOPILOT_CONFIG ?? join(HOME_DIR, "config.json");
 /** Homebrew prefix when running from a Homebrew install (its `brew services` logs to var/log). */
 const BREW_PREFIX = COMPILED ? process.execPath.match(/^(.*)\/Cellar\//)?.[1] ?? null : null;
-export const LOG_PATH = BREW_PREFIX ? join(BREW_PREFIX, "var", "log", "autopilot.log") : join(HOME_DIR, "logs", "autopilot.log");
+export const LOG_PATH = APP_BUNDLE && !process.env.AUTOPILOT_HOME
+  ? join(homedir(), "Library", "Logs", "Autopilot", "autopilot.log")
+  : BREW_PREFIX ? join(BREW_PREFIX, "var", "log", "autopilot.log") : join(HOME_DIR, "logs", "autopilot.log");
 
 import { TRACKER_KINDS, TRACKERS, type TrackerKind } from "../trackers/tracker";
 

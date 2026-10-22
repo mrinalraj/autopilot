@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { COMPILED, HOME_DIR, LOG_PATH } from "../config/config";
+import { isDesktop } from "./desktop";
 
 /** LaunchAgent that runs `autopilot start` at login and restarts it if it exits. */
 export const LABEL = "dev.autopilot";
@@ -73,6 +74,7 @@ export function restartService() {
 }
 
 export function serviceStatus(): string {
+  if (isDesktop()) return "Managed by Autopilot.app";
   const label = loadedLabel();
   if (!label) return "not running as a service";
   const r = launchctl("print", `${domain()}/${label}`);

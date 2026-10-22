@@ -1,5 +1,5 @@
 import { version } from "../package.json";
-import { baseUrl, CONFIG_PATH, HOME_DIR, loadConfig, LOG_PATH } from "./config/config";
+import { APP_BUNDLE, baseUrl, CONFIG_PATH, HOME_DIR, loadConfig, LOG_PATH } from "./config/config";
 import { preparePath } from "./platform/env";
 
 const HELP = `autopilot ${version}
@@ -28,8 +28,15 @@ const flags = new Set([sub, ...rest].filter(Boolean));
 try {
   switch (cmd) {
     case "start":
+      if (APP_BUNDLE) throw new Error("Open Autopilot.app to start its background worker.");
       await (await import("./app/daemon")).runDaemon();
       break;
+    case "desktop": {
+      const { desktopEvent, watchDesktopHost } = await import("./platform/desktop");
+      watchDesktopHost();
+      await (await import("./app/daemon")).runDaemon({ onReady: (url) => desktopEvent({ type: "ready", url }) });
+      break;
+    }
     case "once":
       await (await import("./app/daemon")).runDaemon({ once: true });
       break;
@@ -52,9 +59,10 @@ try {
       break;
     }
     case "open":
-      Bun.spawnSync(["open", baseUrl(loadConfig())]);
+      Bun.spawnSync(["open", APP_BUNDLE ?? baseUrl(loadConfig())]);
       break;
     case "service": {
+      if (APP_BUNDLE) throw new Error("Autopilot.app manages its worker. Use Autopilot → Open at Login for automatic startup.");
       const s = await import("./platform/service");
       if (sub === "install") s.installService();
       else if (sub === "uninstall") s.uninstallService();
@@ -82,5 +90,7 @@ try {
   }
 } catch (err) {
   console.error(`autopilot: ${(err as Error).message}`);
+  // The desktop's open stdin would otherwise keep a failed startup alive until timeout.
+  if (cmd === "desktop") process.exit(1);
   process.exitCode = 1;
 }

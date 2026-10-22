@@ -6,6 +6,7 @@ import { runInTerminal } from "../../workspaces/launch";
 import { openTracker } from "../../trackers/connect";
 import { resetTickets } from "../../app/reset";
 import { managedByLaunchd } from "../../updates/update";
+import { desktopEvent, isDesktop } from "../../platform/desktop";
 import { log } from "../../shared/log";
 import { redirect, go } from "../http";
 import type { WebContext } from "../context";
@@ -180,8 +181,9 @@ export async function handleAction(path: string, form: FormData, ctx: WebContext
     return redirect(`/settings?notice=${encodeURIComponent(msg)}`);
   }
   if (path === "/actions/restart") {
-    if (!managedByLaunchd()) return redirect(`/settings?error=${encodeURIComponent("Not running as a service; restart it where you started it.")}`);
-    setTimeout(() => process.exit(0), 300); // launchd starts it again
+    if (!isDesktop() && !managedByLaunchd()) return redirect(`/settings?error=${encodeURIComponent("Not running as a service; restart it where you started it.")}`);
+    desktopEvent({ type: "restarting" });
+    setTimeout(() => process.exit(0), 300); // the native host or launchd starts it again
     return redirect("/");
   }
   if (path === "/update") {

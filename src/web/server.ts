@@ -9,7 +9,7 @@ import { handlePage } from "./routes/pages";
 import type { WebContext, WebOptions } from "./context";
 
 /** HTTP composition and request security. Rendering and application actions live separately. */
-export function startWeb(ap: Autopilot, extras: WebOptions = {}) {
+export function startWeb(ap: Autopilot, extras: WebOptions = {}, listening?: ReturnType<typeof Bun.serve>) {
   const port = ap.cfg.port;
   const csrf = ap.store.getMeta("csrf_token") ?? randomBytes(24).toString("hex");
   ap.store.setMeta("csrf_token", csrf);
@@ -23,9 +23,9 @@ export function startWeb(ap: Autopilot, extras: WebOptions = {}) {
     const actual = Buffer.from(token), expected = Buffer.from(csrf);
     return actual.length === expected.length && timingSafeEqual(actual, expected);
   };
-  const server = Bun.serve({
+  const options = {
     hostname: "127.0.0.1", port,
-    async fetch(req) {
+    async fetch(req: Request) {
       if (!allowedHosts.has(req.headers.get("host") ?? "")) return new Response("forbidden host", { status: 403 });
       const url = new URL(req.url);
       if (req.method === "POST") {
@@ -39,7 +39,9 @@ export function startWeb(ap: Autopilot, extras: WebOptions = {}) {
       }
       return handlePage(url, context);
     },
-  });
+  };
+  const server = listening ?? Bun.serve(options);
+  if (listening) listening.reload(options);
   log.info("approval page at http://localhost:" + server.port);
   return server;
 }
