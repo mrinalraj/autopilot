@@ -8,6 +8,7 @@ import type { TicketViewData } from "../../models";
 export function ticketComponents(data: TicketViewData) {
   const { tokenField } = data;
   const actionBase = (r: IssueRow) => `/issues/${encodeURIComponent(r.identifier)}`;
+  const triageFormId = (r: IssueRow) => `triage-${esc(r.identifier)}`;
   const isLow = (r: IssueRow) => r.confidence < data.cfg.lowConfidenceThreshold;
   const actionable = (r: IssueRow) => r.status === "pending" || r.status === "failed";
 
@@ -108,6 +109,30 @@ export function ticketComponents(data: TicketViewData) {
     return `<form method="post" action="${actionBase(r)}/resend-prompt">${tokenField}<button data-busy-label="Sending…"${disabled}>Send prompt to chat</button></form>`;
   }
 
+  function triageBox(r: IssueRow) {
+    const ex = explainerOf(r), id = triageFormId(r);
+    const heading = ex.approach ? "Explainer" : "Summary";
+    if (r.status === "approved") return `<div class="box"><h3>${heading}${ex.size ? ` · size ${esc(ex.size)}` : ""}</h3>
+      <p class="triage-text" style="margin-top:0">${esc(ex.summary)}</p>
+      <p class="triage-text"><strong>Approach.</strong> ${esc(ex.approach)}</p>
+      <strong class="small">Likely areas</strong><ul class="small">${ex.likely_areas.map((a) => `<li><code>${esc(a)}</code></li>`).join("")}</ul></div>`;
+    return `<div class="box"><form id="${id}" class="triage-editor" method="post" action="${actionBase(r)}/edit-triage" data-triage-edit>${tokenField}
+        <input type="hidden" name="expected" value="${esc(r.explainer_json)}">
+        <h3 class="triage-heading"><span>${heading}</span><label for="${id}-size">Size
+          <select id="${id}-size" name="size" required>
+            <option value="" disabled${ex.size ? "" : " selected"}>—</option>
+            ${["S", "M", "L"].map((size) => `<option value="${size}"${ex.size === size ? " selected" : ""}>${size}</option>`).join("")}
+          </select></label></h3>
+        <textarea id="${id}-summary" name="summary" aria-label="Summary" rows="3" required maxlength="10000">${esc(ex.summary)}</textarea>
+        <label for="${id}-approach">Approach</label>
+        <textarea id="${id}-approach" name="approach" rows="4" maxlength="20000">${esc(ex.approach)}</textarea>
+        <label for="${id}-areas">Likely areas</label>
+        <textarea id="${id}-areas" name="likelyAreas" rows="2" maxlength="10000" placeholder="One file, package or module per line">${esc(ex.likely_areas.join("\n"))}</textarea>
+        <div class="alert" data-triage-error role="alert" hidden></div>
+        <div class="actionsbar"><button type="submit" data-busy-label="Updating…">Update</button></div>
+      </form></div>`;
+  }
+
   /** "Send back to approval…": undo a launch (removes what's left of its worktrees), keeping triage. */
   function sendBackBox(r: IssueRow) {
     if ((r.status !== "running" && r.status !== "failed") || !r.repo) return "";
@@ -142,18 +167,19 @@ export function ticketComponents(data: TicketViewData) {
   }
 
   function modal(r: IssueRow) {
-    const ex = explainerOf(r);
     const t = ticketOf(r);
     const low = isLow(r);
+    // Launch controls belong to the triage form so approval submits the current edits too.
+    const owner = `form="${triageFormId(r)}"`;
     const options = data.catalog
       .map((c) => `<option value="${esc(c.name)}"${c.name === r.repo ? " selected" : ""}>${esc(c.name)} — ${esc(c.path)}</option>`)
       .join("");
 
     const form = actionable(r)
-      ? `<form method="post" action="${actionBase(r)}/approve">${tokenField}
+      ? `<div>
           <div class="${low ? "lowconf" : ""}">
             ${low ? `<p class="warnnote"><strong>Low confidence (${Math.round(r.confidence * 100)}%).</strong> Check the repo before approving.</p>` : ""}
-            <label for="repo-${esc(r.identifier)}" style="margin-top:${low ? "8px" : "0"}">Repo</label><select id="repo-${esc(r.identifier)}" name="repo">${options}</select>
+            <label for="repo-${esc(r.identifier)}" style="margin-top:${low ? "8px" : "0"}">Repo</label><select id="repo-${esc(r.identifier)}" name="repo" ${owner}>${options}</select>
             <div class="muted small" style="margin-top:6px">${esc(r.resolve_reason)}</div>
           </div>
           <div class="grouplabel" id="also-${esc(r.identifier)}">Also change</div>
@@ -161,17 +187,17 @@ export function ticketComponents(data: TicketViewData) {
             .filter((c) => c.name !== r.repo)
             .map((c) => {
               const e = issueExtras(r).find((x) => x.repo === c.name);
-              return `<label><input type="checkbox" name="extra" value="${esc(c.name)}"${e ? " checked" : ""}>
+              return `<label><input type="checkbox" name="extra" value="${esc(c.name)}" ${owner}${e ? " checked" : ""}>
                 <span>${esc(c.name)}${e?.reason ? ` <span class="muted small">— ${esc(e.reason)}</span>` : ""}</span></label>`;
             })
             .join("")}</div>
           <div class="muted small" style="margin-top:6px">Each repo gets its own worktree on the same branch; the session starts in the primary repo with the others added.</div>
           <label for="branch-${esc(r.identifier)}">Branch</label>
-          <input type="text" id="branch-${esc(r.identifier)}" name="branch" value="${esc(r.branch)}" autocomplete="off" spellcheck="false">
+          <input type="text" id="branch-${esc(r.identifier)}" name="branch" value="${esc(r.branch)}" ${owner} autocomplete="off" spellcheck="false">
           <div class="muted small" style="margin-top:6px">2–5 word kebab slug ending in <code>-${esc(r.identifier.toLowerCase())}</code>. Invalid names are repaired automatically.</div>
-          <div class="actionsbar"><button class="primary" type="submit" data-busy-label="Launching…">${r.status === "failed" ? "Retry launch" : "Approve &amp; launch"}</button>
-            <button class="ghost-danger" type="submit" formaction="${actionBase(r)}/reject" data-busy-label="Rejecting…">Reject</button></div>
-        </form>`
+          <div class="actionsbar"><button class="primary" type="submit" ${owner} formaction="${actionBase(r)}/approve" data-busy-label="Launching…">${r.status === "failed" ? "Retry launch" : "Approve &amp; launch"}</button>
+            <button class="ghost-danger" type="submit" ${owner} formaction="${actionBase(r)}/reject" formnovalidate data-skip-triage data-busy-label="Rejecting…">Reject</button></div>
+        </div>`
       : `<p style="margin:0"><strong>Repo:</strong> ${esc(r.repo)} <span class="muted">(${esc(r.repo_path)})</span>
           ${issueExtras(r).map((e) => `<br><strong>Also:</strong> ${esc(e.repo)} <span class="muted">(${esc(e.repo_path)})</span>`).join("")}
           <br><strong>Branch:</strong> <code>${esc(r.branch)}</code>
@@ -197,10 +223,7 @@ export function ticketComponents(data: TicketViewData) {
             <div><div class="box"><h3>Ticket description · verbatim, untrusted</h3><pre>${esc(t.description ?? "(empty)")}</pre></div>
               <div class="box"><h3>Comments · verbatim</h3>${comments}</div></div>
             <div>
-              <div class="box"><h3>${ex.approach ? `Explainer${ex.size ? ` · size ${esc(ex.size)}` : ""}` : "Summary"}</h3><p style="margin-top:0">${esc(ex.summary)}</p>
-                <p><strong>Approach.</strong> ${esc(ex.approach)}</p>
-                <strong class="small">Likely areas</strong><ul class="small">${ex.likely_areas.map((a) => `<li><code>${esc(a)}</code></li>`).join("")}</ul>
-                </div>
+              ${triageBox(r)}
               ${r.status === "running" ? progressBox(r) : ""}
               ${deleteBox(r)}
               ${sendBackBox(r)}

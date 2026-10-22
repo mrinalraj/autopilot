@@ -241,6 +241,14 @@ Terminal tabs start in the primary worktree:
   git uses `git worktree remove`.
 - **First use of Terminal or iTerm:** macOS asks once whether autopilot may control it.
 
+## Editing triage
+
+In ticket details, edit the summary, approach, likely code areas and size directly in the triage
+box. **Update** saves the explanation and session brief. **Approve & launch** also saves the current
+edits before launching, so you don't need to click Update first. A failed save prevents launch.
+Future launches and prompt resends use the saved text. Existing agent conversations are not changed automatically.
+Edits remain in the form if a save fails, and an older form cannot overwrite newer triage.
+
 ## Importing existing work
 
 On every poll, two kinds of existing work are added under the phase sections, without triage or LLM
