@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-autopilot (formerly linear-autopilot) is a local macOS daemon in Bun + TypeScript. It watches a
+autopilot (formerly linear-autopilot) is a macOS app with a local daemon in Bun + TypeScript. It watches a
 tracker (Linear, or Jira Cloud) for tickets assigned to the user in their pickup statuses, triages
 each one with `claude -p` (repo, extra repos, branch, explainer), and asks for approval on a local
 page. On approval it creates a worktree per repo through the chosen launcher (Supacode, Superset, Worktrunk,
@@ -15,6 +15,9 @@ bun run typecheck        # tsc --noEmit
 bun run start            # dev daemon on http://localhost:4800 (data in the project folder)
 bun run once             # one real poll (needs a sign-in)
 bun run build            # standalone binaries + tarballs + checksums.txt in dist/
+bun run build:app        # native macOS apps + ZIPs + desktop-checksums.txt in dist/
+bun run build:release    # CLI first (clears dist), then desktop artifacts
+bun run cask             # generate packaging/Casks/autopilot.rb from desktop ZIPs
 AUTOPILOT_HOME=$PWD/.dev/fresh bun src/cli.ts start   # a throwaway home: walks first-run setup
 ```
 
@@ -22,7 +25,12 @@ AUTOPILOT_HOME=$PWD/.dev/fresh bun src/cli.ts start   # a throwaway home: walks 
 `login [--force]`, `reset`, `update [--check]`, `open`, `service install|uninstall|restart|status`,
 `paths`, `version`).
 
-- **Installed app:** Homebrew (`brew install mrinalraj/tap/autopilot`) under `brew services`
+- **Desktop app:** `desktop/macos/main.swift` embeds the UI in WKWebView and owns the bundled
+  daemon through its `desktop` command and stdin lifetime. Closing the window keeps it running;
+  Quit stops only that child. Open at Login uses SMAppService. See `docs/desktop.md` for app build,
+  signing, cask and migration instructions. The desktop beta is ad-hoc signed and not notarized.
+  Data and Keychain accounts match compiled CLI installs; logs are in `~/Library/Logs/Autopilot/`.
+- **Headless formula:** Homebrew (`brew install --formula mrinalraj/tap/autopilot`) under `brew services`
   (label `sh.brew.autopilot`) on http://localhost:4747. Its data is in
   `~/Library/Application Support/autopilot/`, and its logs are at
   `$(brew --prefix)/var/log/autopilot.log`.
@@ -260,6 +268,9 @@ Other polling rules:
   - Standalone installs verify the SHA-256 and the new binary's version before swapping. Homebrew
     installs run `brew upgrade autopilot` with `HOMEBREW_AUTO_UPDATE_SECS=0`, so the tap is fresh.
   - Never install without an explicit user action.
+  - Desktop bundles are a separate install kind: upgrade the whole app through `brew upgrade
+    --cask autopilot` (while quit), or replace a manually installed bundle. Never swap its helper
+    binary in place, which invalidates the app signature.
 - **Renamed app:** keep the migrations (App Support folder, Keychain service, `BREW_LABELS`
   including the old `linear-autopilot` labels, the tap's `formula_renames.json`) until there's a
   reason to drop them.
@@ -279,14 +290,18 @@ version bump, tag or installation. See [docs/changelog.md](docs/changelog.md) fo
    new Unreleased section, bump `version` in `package.json`, commit, and make an annotated tag
    `v<version>`. Push `main` and the tag. Never retag or force-push a pushed tag; ship the next
    beta instead.
-3. **Build:** `bun run build`.
+3. **Build:** `bun run build:release`. Ad-hoc beta releases must disclose their signing status
+   and first-launch approval instructions. For Developer ID signing and notarization, set
+   `AUTOPILOT_SIGN_IDENTITY` and `AUTOPILOT_NOTARY_PROFILE` as described in `docs/desktop.md`.
 4. **Publish:** export `bun run changelog <version> > /tmp/autopilot-release-notes.md`, then
    `gh release create v<version> --repo mrinalraj/autopilot --prerelease --notes-file /tmp/autopilot-release-notes.md`
-   with the two tarballs and `checksums.txt`.
+   with the two CLI tarballs and `checksums.txt`, both desktop ZIPs and `desktop-checksums.txt`.
 5. **Tap:** `scripts/brew-formula.sh` writes `packaging/autopilot.rb` (git-ignored). Copy it to
    `Formula/autopilot.rb` in github.com/mrinalraj/homebrew-tap and push.
-6. **Upgrade:** users get it with `brew update && brew upgrade autopilot && brew services restart
-   autopilot`, or through the in-app banner.
+   `bun run cask` writes `packaging/Casks/autopilot.rb`; copy it to `Casks/autopilot.rb` in the tap.
+6. **Upgrade:** cask users quit the app, run `brew update && brew upgrade --cask autopilot`, then
+   reopen it. Formula users run `brew update && brew upgrade --formula autopilot && brew services
+   restart autopilot`, or use the web interface's update banner.
 
 GitHub accounts on this machine:
 

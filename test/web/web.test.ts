@@ -39,10 +39,13 @@ beforeAll(() => {
   });
   cfgStateDir = cfg.stateDir;
   const ap = new Autopilot(cfg, store, { kind: "linear", label: "Linear" } as Tracker, {} as LLM);
+  // Exercise the daemon's startup listener handoff with the same security/action checks below.
+  const listening = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("starting", { status: 503 }) });
   server = startWeb(ap, {
     health: health as never, configPath: join(dir, "settings.json"),
     gh: () => ({ installed: true, accounts: [{ name: "test-account", active: true }] }),
-  });
+  }, listening);
+  expect(server).toBe(listening);
 });
 
 afterAll(() => {

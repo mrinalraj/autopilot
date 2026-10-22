@@ -1,17 +1,34 @@
 #!/bin/bash
-# Builds, then installs (or upgrades) autopilot through a local Homebrew tap that points at
-# dist/. For use while the GitHub repo is private: Homebrew can't download private release assets.
+# Build and install the desktop cask from a local tap; --formula keeps the headless install.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TAP="${AUTOPILOT_TAP:-mrinalraj/local}"
-bun run build >/dev/null
+KIND=cask
+case "${1:-}" in
+  --formula) KIND=formula;;
+  --cask|"") ;;
+  *) echo "usage: brew-install-local.sh [--cask|--formula]" >&2; exit 1;;
+esac
+if [ "$KIND" = cask ]; then
+  if brew list --formula autopilot >/dev/null 2>&1; then
+    echo "Stop and remove the old formula first: brew services stop autopilot && brew uninstall --formula autopilot" >&2
+    exit 1
+  fi
+  bun run build:app
+else
+  bun run build
+fi
 brew tap "$TAP" >/dev/null 2>&1 || brew tap-new --no-git "$TAP" >/dev/null
 TAP_DIR="$(brew --repository "$TAP")"
-mkdir -p "$TAP_DIR/Formula"
-scripts/brew-formula.sh --local "$TAP_DIR/Formula/autopilot.rb"
-if brew list --formula autopilot >/dev/null 2>&1; then
-  brew reinstall --formula "$TAP/autopilot"
+if [ "$KIND" = cask ]; then
+  scripts/brew-cask.sh --local "$TAP_DIR/Casks/autopilot.rb"
 else
-  brew install --formula "$TAP/autopilot"
+  mkdir -p "$TAP_DIR/Formula"
+  scripts/brew-formula.sh --local "$TAP_DIR/Formula/autopilot.rb"
+fi
+if brew list "--$KIND" autopilot >/dev/null 2>&1; then
+  brew reinstall "--$KIND" "$TAP/autopilot"
+else
+  brew install "--$KIND" "$TAP/autopilot"
 fi
 autopilot version

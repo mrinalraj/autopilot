@@ -4,6 +4,7 @@ import type { Config } from "../config/config";
 import { notifyState } from "../platform/notify";
 import { run, shellQuote } from "../workspaces/common";
 import { ghEnv } from "../workspaces/work";
+import { isDesktop } from "../platform/desktop";
 
 /** Something the setup is missing, shown as a banner on the home screen until it's fixed. */
 export interface SetupItem {
@@ -170,7 +171,7 @@ export class Health {
       }
     }
 
-    if (!Bun.which("terminal-notifier", { PATH: process.env.PATH }) && !existsSync("/opt/homebrew/bin/terminal-notifier") && !existsSync("/usr/local/bin/terminal-notifier")) {
+    if (!isDesktop() && !Bun.which("terminal-notifier", { PATH: process.env.PATH }) && !existsSync("/opt/homebrew/bin/terminal-notifier") && !existsSync("/usr/local/bin/terminal-notifier")) {
       items.push({
         id: "notifier-install",
         level: "optional",
@@ -178,7 +179,7 @@ export class Health {
         detail: "With terminal-notifier, clicking a new-ticket notification opens it here. Without it, notifications are plain.",
         command: "brew install terminal-notifier",
       });
-    } else if (notifyState.permissionDenied) {
+    } else if (!isDesktop() && notifyState.permissionDenied) {
       items.push({
         id: "notifier-permission",
         level: "optional",
@@ -188,7 +189,7 @@ export class Health {
       });
     }
 
-    items.push({
+    if (!isDesktop()) items.push({
       id: "install-app",
       level: "optional",
       title: "Install as an app",

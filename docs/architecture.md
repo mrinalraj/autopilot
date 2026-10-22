@@ -1,5 +1,10 @@
 # Architecture
 
+The macOS desktop host is in `desktop/macos/`; see [desktop.md](desktop.md) for lifecycle and
+distribution. It launches the bundled CLI's `desktop` command, displays the existing loopback UI
+in WKWebView and receives readiness/notification events over a child pipe. The web layer exposes
+no privileged native bridge. CLI/formula installs continue to use the same application services.
+
 Autopilot is a Bun/TypeScript daemon with server-rendered HTML. There is no frontend framework,
 separate API deployment, or dependency-injection container. The folders separate responsibilities
 while keeping the existing CLI, HTTP routes, configuration format and SQLite schema intact.

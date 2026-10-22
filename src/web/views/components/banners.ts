@@ -32,7 +32,9 @@ export function updateBanner(updater: UpdateViewData | undefined, tokenField: st
   const err = updater.status === "error" && updater.error ? `<div class="alert" style="margin-top:14px">Update: ${esc(updater.error)}</div>` : "";
   if (!u?.available) return err;
   const action =
-    u.kind === "source"
+    u.kind === "desktop"
+      ? `<span class="small muted">Quit Autopilot, run <code>brew upgrade --cask autopilot</code>, then reopen it. For a manual install, replace the app from the release.</span>`
+      : u.kind === "source"
       ? `<span class="small muted">Running from source: <code>git pull</code> and restart</span>`
       : `<form method="post" action="/update">${tokenField}<button class="primary" data-busy-label="Updating…">${u.kind === "homebrew" ? "Update via Homebrew" : "Update now"}</button></form>`;
   return `<div class="update"><div class="grow"><strong>Update available: ${esc(u.latest)}</strong>

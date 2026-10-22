@@ -15,8 +15,12 @@
     "reset": "bun run src/cli.ts reset",
     "cli": "bun run src/cli.ts",
     "build": "scripts/build.sh",
+    "build:app": "scripts/build-app.sh",
+    "build:release": "scripts/build.sh && scripts/build-app.sh",
+    "cask": "scripts/brew-cask.sh",
     "changelog": "bun scripts/changelog.ts",
     "test": "bun test",
+    "test:app": "bun scripts/test-app.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

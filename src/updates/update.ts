@@ -16,7 +16,7 @@ import { log } from "../shared/log";
 const api = () => process.env.AUTOPILOT_UPDATE_API ?? "https://api.github.com";
 const repo = () => process.env.AUTOPILOT_UPDATE_REPO ?? repository;
 
-export type InstallKind = "homebrew" | "standalone" | "source";
+export type InstallKind = "desktop" | "homebrew" | "standalone" | "source";
 
 export interface UpdateInfo {
   current: string;
@@ -31,8 +31,9 @@ export interface UpdateInfo {
   checksumsUrl: string | null;
 }
 
-export const installKind = (execPath = process.execPath): InstallKind =>
-  !COMPILED ? "source" : execPath.includes("/Cellar/") ? "homebrew" : "standalone";
+export const installKind = (execPath = process.execPath, compiled = COMPILED): InstallKind =>
+  !compiled ? "source" : /\.app\/Contents\/Helpers\/autopilot$/.test(execPath) ? "desktop"
+    : execPath.includes("/Cellar/") ? "homebrew" : "standalone";
 
 /**
  * Semver-style comparison: x.y.z numerically, then a release beats its pre-releases
@@ -114,6 +115,7 @@ async function download(url: string): Promise<Uint8Array> {
  * over the old one (atomic on the same volume). The caller restarts the process.
  */
 export async function installStandalone(info: UpdateInfo, target = process.execPath): Promise<void> {
+  if (installKind(target, true) === "desktop") throw new Error("Update the whole app with brew upgrade --cask autopilot; bundled executables cannot be replaced separately.");
   if (!info.assetUrl || !info.checksumsUrl) throw new Error(`release ${info.latest} has no ${assetName(info.latest)} or checksums.txt`);
   accessSync(dirname(target), constants.W_OK);
 
@@ -159,6 +161,7 @@ export const managedByLaunchd = () => !!process.env.XPC_SERVICE_NAME && process.
 
 /** Installs `info` for this install kind. Returns whether a restart will pick it up automatically. */
 export async function applyUpdate(info: UpdateInfo): Promise<{ restartsAutomatically: boolean }> {
+  if (info.kind === "desktop" || installKind() === "desktop") throw new Error("Quit Autopilot, run brew upgrade --cask autopilot, then reopen it. For a manual install, replace Autopilot.app with the new release.");
   if (info.kind === "source") throw new Error("running from source: update with git pull instead");
   log.info(`updating ${info.current} → ${info.latest} (${info.kind})`);
   if (info.kind === "homebrew") installHomebrew();

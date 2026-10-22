@@ -1,12 +1,12 @@
 # autopilot
 
-A local macOS daemon that turns Linear or Jira tickets into Claude Code sessions, with you approving each one.
+A macOS app that turns Linear or Jira tickets into Claude Code sessions, with you approving each one.
 
 [Changelog](CHANGELOG.md) · [Maintaining and reusing release notes](docs/changelog.md)
 
 It watches your tracker (Linear, or Jira Cloud) for tickets assigned to you in **Ready for Development**. For each one it picks
 the repo among the ones you picked (parent folders and/or individual repos), plus any other repos the ticket also changes. It proposes a branch,
-writes a short explainer, then asks you to approve or reject it on a local web page. When you
+writes a short explainer, then asks you to approve or reject it in Autopilot. When you
 approve, the launcher selected in Settings creates a worktree on that branch in every repo involved.
 Its own worktree creation and lifecycle hooks run. A Claude Code session opens in the primary repo with the other worktrees added, so
 the agent can change them all. After that, the page tracks the work until the PRs are merged.
@@ -19,15 +19,37 @@ Linear or Jira (MCP, OAuth) ──▶ newly eligible ticket ──▶ triage: re
    ──▶ In progress: commits, PR state (git + gh) ──▶ merged
 ```
 
-## Install (Homebrew)
+## Desktop app (Homebrew cask)
+
+The desktop beta supports Apple Silicon and Intel on macOS 13 Ventura or later. Install with:
 
 ```sh
-brew install mrinalraj/tap/autopilot
-brew services start autopilot   # runs at login, restarts on crash
-open http://localhost:4747      # first-run setup
+brew install --cask mrinalraj/tap/autopilot
+open -a Autopilot
 ```
 
-The first visit walks through setup, and nothing is checked until it's done:
+This beta is **ad-hoc signed and not notarized**. After trying to open it, if macOS blocks it
+because the developer cannot be verified, use **System Settings → Privacy & Security → Open Anyway**
+and confirm. See [Apple's first-launch instructions](https://support.apple.com/en-us/102445).
+
+Autopilot has its own window, Dock icon, menu bar controls, notifications and approval-count
+badge. It bundles the daemon and runtime; Bun and a separate service are not needed. Closing
+the window keeps it watching tickets; **Quit Autopilot** stops its worker. Enable
+**Autopilot → Open at Login** to start it when you sign in. Tracker OAuth opens in your browser.
+
+If you already use the formula, stop it and remove its binary before installing the cask:
+
+```sh
+brew services stop autopilot
+brew uninstall --formula autopilot
+```
+
+For a standalone LaunchAgent, run `autopilot service uninstall` with the old binary instead.
+Keep `~/Library/Application Support/autopilot`: the app reuses its settings and tickets, and
+the existing Keychain sign-in. If another process owns the configured port, the app reports it
+without changing ticket state. See [desktop development and distribution](docs/desktop.md).
+
+The first launch walks through setup, and nothing is checked until it's done:
 
 1. **Repos:** parent folders (every git repo directly inside) and/or individual repos. Folders in
    your home that hold repos are suggested, and **Choose in Finder** opens the macOS folder picker.
@@ -42,16 +64,21 @@ Settings → Maintenance → **Run setup again** goes through it again; `autopil
 the terminal. Upgrading from `linear-autopilot` keeps
 your data, settings and sign-in: they move to the new name on first start.
 
-The formula pulls in `terminal-notifier` and `gh`. `launchd` and `osascript` are part
-of macOS. Under `brew services`, logs go to `$(brew --prefix)/var/log/autopilot.log`.
+The cask pulls in `gh`; Claude Code and the selected launcher must be installed separately.
+Native notifications do not need `terminal-notifier`. App logs are at
+`~/Library/Logs/Autopilot/autopilot.log`, also available through **View → Show Logs**.
 
-To install your own build instead, run `scripts/brew-install-local.sh` (builds, then installs from
-a local tap).
+To install your own build through Homebrew, run `scripts/brew-install-local.sh` (builds, then
+installs the cask from a local tap). `--formula` selects the headless formula instead.
 
 ## Quick start
 
 Requirements: macOS, your selected launcher, the Claude Code CLI (logged in), and `gh` (logged in) for
 PR tracking.
+
+The headless formula remains available with `brew install --formula mrinalraj/tap/autopilot`
+and `brew services start autopilot`. Use either the desktop app or the headless service for the
+same data folder, and stop the service before switching to the app.
 
 With the standalone binary (from a release, or `bun run build`):
 
@@ -79,9 +106,10 @@ On the very first poll, the tickets already waiting in your pickup statuses are 
 away. If that's a big backlog, set `processExistingOnFirstRun` to `false` first: they're then only
 recorded, and only tickets that arrive later are proposed.
 
-### Install as an app (PWA)
+### Browser app (optional, headless installs)
 
-The page is an installable web app, with its own window and Dock icon.
+Headless installations also serve an installable web app. The native app above manages its own
+worker; this browser shortcut requires the headless service to be running.
 
 - **Chrome:** open http://localhost:4747 and click the install icon in the address bar (or ⋮ → Cast,
   save and share → Install page as app).
@@ -280,7 +308,11 @@ progress and links without manual triage, session creation or launcher setup con
 | `service install` / `uninstall` / `restart` / `status` | Manage the LaunchAgent `dev.autopilot`. Run `install` again after moving the binary. |
 | `open` / `paths` / `version` | Open the page; show where config, state and logs live; print the version. |
 
-Development: `bun test`, `bun run typecheck`, `bun run build`.
+Development: `bun test`, `bun run typecheck`, `bun run build:app` (desktop), `bun run build` (CLI).
+
+The cask also links the bundled CLI. `autopilot open` opens the native app; `start` and `service`
+commands direct you to the app's lifecycle controls. `update --check` still checks releases;
+desktop upgrades replace the entire bundle.
 
 Logs: `logs/autopilot.log` under the home folder (not rotated). Health check:
 `curl localhost:4747/healthz`.
@@ -293,13 +325,22 @@ version exists, the page shows an **Update available** banner with the release n
 - **Standalone binary:** **Update now** downloads this Mac's build and checks its SHA-256 against
   the release's `checksums.txt`. It also confirms the new binary reports the expected version
   before swapping it in place. The service then restarts into it.
-- **Homebrew install:** the button runs `brew upgrade autopilot`.
+- **Desktop cask:** quit Autopilot, run `brew upgrade --cask autopilot`, then reopen it. Manual
+  app installs replace `Autopilot.app` from the release. The bundled CLI is never updated alone.
+- **Homebrew formula:** the button runs `brew upgrade autopilot`.
 - **Running from source:** the banner just says to `git pull`.
 
-Nothing installs without a click. `autopilot update --check` does the same check from the
+Nothing installs automatically. `autopilot update --check` does the same check from the
 command line.
 
 ## Building and releasing
+
+`bun run build:app` builds native Apple Silicon and Intel `.app` bundles, ZIP archives and
+`desktop-checksums.txt`. `bun run cask` generates `packaging/Casks/autopilot.rb` with their
+checksums. The current beta uses ad-hoc signing; Developer ID signing and notarization support
+distribution without the unidentified-developer override. See [the desktop release instructions](docs/desktop.md).
+`bun run build:release` builds both the
+CLI and desktop artifacts (the CLI build clears `dist/`, so run it first).
 
 `bun run build` (`scripts/build.sh`) compiles standalone binaries for Apple Silicon and Intel into
 `dist/`:
@@ -468,6 +509,7 @@ The directory boundaries and common edit paths are explained in [Architecture](d
 | `src/shared/` / `src/types/` | Logging / asset import declarations |
 | `public/icons/` | App icons embedded into the binary |
 | `scripts/` | Release builds and Homebrew tooling |
+| `desktop/macos/` | Native AppKit/WebKit host, bundle metadata and signing entitlements |
 | `test/` | Tests grouped by subsystem; fake services and shared data under `test/fixtures/` |
 
 ## License
