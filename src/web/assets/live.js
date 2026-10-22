@@ -10,7 +10,37 @@
     btn.classList.add("busy");
     btn.setAttribute("aria-busy", "true");
     if (btn.dataset.busyLabel !== undefined) btn.textContent = btn.dataset.busyLabel || btn.textContent;
+    if (form.hasAttribute("data-triage-edit") && !btn.hasAttribute("data-skip-triage")) {
+      e.preventDefault();
+      void saveTriage(form, btn);
+    }
   });
+  // Keep the user's edits in the form when validation, a conflict or a connection fails.
+  const saveTriage = async (form, btn) => {
+    const error = form.querySelector("[data-triage-error]");
+    error.hidden = true;
+    const body = new FormData(form);
+    body.set("response", "json");
+    try {
+      const response = await fetch(btn.getAttribute("formaction") || form.action, { method: "POST", body });
+      if (response.redirected) throw new Error("The page is out of date. Copy your edits before reloading.");
+      if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("Could not save triage. Your edits are still here; try again.");
+      const result = await response.json();
+      // Saving may succeed before a later launch validation/write fails; keep retries current.
+      if (result.expected !== undefined) form.elements.namedItem("expected").value = result.expected;
+      if (!response.ok || !result.ok) throw new Error(result.error || "Could not save triage. Try again.");
+      history.replaceState(null, "", result.location);
+      location.reload();
+    } catch (err) {
+      error.textContent = err.message || "Could not save triage. Your edits are still here; try again.";
+      error.hidden = false;
+      error.scrollIntoView({ block: "nearest" });
+      delete form.dataset.busy;
+      btn.classList.remove("busy");
+      btn.removeAttribute("aria-busy");
+      btn.innerHTML = btn.dataset.label;
+    }
+  };
   // Coming back with the Back button restores the page from cache: clear the busy state.
   addEventListener("pageshow", () => {
     document.querySelectorAll("form[data-busy]").forEach((f) => delete f.dataset.busy);

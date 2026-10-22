@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { IssueRow, TicketSnapshot } from "../domain/issues";
 import type { TrackerIssue } from "../trackers/tracker";
 import { renderBrief } from "./brief-template";
@@ -41,14 +41,14 @@ export function initPrompt(path: string, others: { repo: string; path: string }[
 }
 
 export function writeBrief(row: IssueRow) {
-  mkdirSync(join(row.brief_path, ".."), { recursive: true });
+  mkdirSync(dirname(row.brief_path), { recursive: true });
+  const temporary = join(dirname(row.brief_path), `.brief-${crypto.randomUUID()}.tmp`);
   try {
-    chmodSync(row.brief_path, 0o644);
-  } catch {
-    // first write
+    writeFileSync(temporary, renderBrief(row), { mode: 0o444 });
+    renameSync(temporary, row.brief_path);
+  } finally {
+    rmSync(temporary, { force: true });
   }
-  writeFileSync(row.brief_path, renderBrief(row));
-  chmodSync(row.brief_path, 0o444);
 }
 
 export function removeBrief(path: string) {

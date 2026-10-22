@@ -33,6 +33,9 @@ unreleased changes after `0.1.0-beta.8`.
   quitting the app stops its worker.
 - Apple Silicon and Intel app builds, signing/notarization support and Homebrew cask generation,
   with migration instructions that preserve existing settings, tickets and Keychain sign-in.
+- Editable ticket triage: change the summary, approach, likely code areas and size directly in the
+  existing box and click Update. Approve & launch saves any current edits first. Saved edits persist
+  in the database and brief; stale forms and save errors prevent launch and preserve the draft.
 - Superset launcher support for local workspaces, multi-repo tickets, Claude terminals, workspace
   links and worktree cleanup. Configure its executable with `launch.supersetBin`.
 - Automatic registration of existing worktrees with the selected launcher, preserving their paths,

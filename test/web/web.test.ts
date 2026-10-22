@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../../src/config/config";
@@ -198,13 +198,77 @@ test("pages keep the browser's Origin on same-origin form posts", async () => {
   expect(res.headers.get("referrer-policy")).toBe("same-origin");
 });
 
-test("reject via the form, as a browser sends it", async () => {
+test("triage editing uses CSRF-protected forms, returns saved values and rejects stale submissions", async () => {
+  const html = await (await fetch(`${base}/`)).text();
+  const csrf = csrfFrom(html);
+  const before = store.getIssueByIdentifier("ENG-9")!;
+  const edits = { csrf, expected: before.explainer_json, summary: "Edited summary </textarea><script>bad()</script>",
+    approach: "Update the API\nVerify compatibility", likelyAreas: "src/api.ts\ntest/api.test.ts", size: "M", response: "json" };
+  const post = (body: Record<string, string>, origin = base) => fetch(`${base}/issues/ENG-9/edit-triage`, {
+    method: "POST", headers: { Origin: origin }, body: new URLSearchParams(body), redirect: "manual",
+  });
+  expect((await post({ ...edits, csrf: "wrong" })).status).toBe(303);
+  expect((await post(edits, "https://evil.example")).status).toBe(403);
+  expect(store.getIssueByIdentifier("ENG-9")?.explainer_json).toBe(before.explainer_json);
+  const response = await post(edits);
+  expect(response.status).toBe(200);
+  const result = await response.json();
+  expect(result.ok).toBe(true);
+  expect(result.location).toEndWith("#m-ENG-9");
+  const saved = store.getIssueByIdentifier("ENG-9")!;
+  expect(saved.status).toBe("pending");
+  expect(JSON.parse(saved.explainer_json).summary).toBe(edits.summary);
+  expect(readFileSync(saved.brief_path, "utf8")).toContain(edits.approach);
+  const page = await (await fetch(`${base}/`)).text();
+  expect(page).toContain("Edited summary &lt;/textarea&gt;&lt;script&gt;");
+  expect(page).not.toContain("<script>bad()");
+  const stale = await post({ ...edits, summary: "Stale replacement" });
+  expect(stale.status).toBe(400);
+  expect((await stale.json()).error).toContain("changed since");
+  expect(store.getIssueByIdentifier("ENG-9")?.explainer_json).toBe(saved.explainer_json);
+  const native = await post({ ...edits, expected: saved.explainer_json, response: "" });
+  expect(native.status).toBe(303);
+  expect(native.headers.get("location")).toEndWith("#m-ENG-9");
+});
+
+test("approval refuses invalid, stale or unwritable triage before changing status or launching", async () => {
   const csrf = csrfFrom(await (await fetch(`${base}/`)).text());
+  const before = store.getIssueByIdentifier("ENG-9")!;
+  const edits = { csrf, expected: before.explainer_json, summary: "Unsaved correction", approach: "Fix the handler",
+    likelyAreas: "src/api.ts", size: "M", repo: "backend", branch: "fix-handler-eng-9", response: "json" };
+  const post = (patch: Record<string, string>) => fetch(`${base}/issues/ENG-9/approve`, {
+    method: "POST", headers: { Origin: base }, body: new URLSearchParams({ ...edits, ...patch }), redirect: "manual",
+  });
+  expect((await post({ csrf: "wrong" })).status).toBe(303);
+  const invalid: Record<string, string>[] = [{ summary: "" }, { expected: "stale revision" }, { size: "XL" }, { repo: "unknown" }];
+  for (const patch of invalid) {
+    const res = await post(patch);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, location: expect.stringContaining("#m-ENG-9") });
+    expect(store.getIssueByIdentifier("ENG-9")).toEqual(before);
+  }
+  const blocked = join(dir, "blocked-brief");
+  mkdirSync(blocked);
+  store.db.query("UPDATE issues SET brief_path = ? WHERE identifier = ?").run(blocked, "ENG-9");
+  try {
+    const res = await post({});
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("Could not save");
+    expect(store.getIssueByIdentifier("ENG-9")).toEqual({ ...before, brief_path: blocked });
+  } finally {
+    store.db.query("UPDATE issues SET brief_path = ? WHERE identifier = ?").run(before.brief_path, "ENG-9");
+  }
+});
+
+test("reject via the shared form ignores unsaved triage", async () => {
+  const csrf = csrfFrom(await (await fetch(`${base}/`)).text());
+  const before = store.getIssueByIdentifier("ENG-9")!.explainer_json;
   const res = await fetch(`${base}/issues/ENG-9/reject`, {
-    method: "POST", body: new URLSearchParams({ csrf }), headers: { Origin: base }, redirect: "manual",
+    method: "POST", body: new URLSearchParams({ csrf, expected: before, summary: "", size: "" }), headers: { Origin: base }, redirect: "manual",
   });
   expect(res.status).toBe(303);
   expect(store.getIssueByIdentifier("ENG-9")!.status).toBe("rejected");
+  expect(store.getIssueByIdentifier("ENG-9")!.explainer_json).toBe(before);
   expect(await (await fetch(`${base}/`)).text()).toContain(`<h2>Awaiting approval</h2><span class="count">0</span>`);
 });
 

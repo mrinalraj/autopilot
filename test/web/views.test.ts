@@ -27,6 +27,33 @@ test("ticket templates render snapshots without a database, launcher or HTTP ser
   expect({ snapshot, row }).toEqual(before);
 });
 
+test("the existing triage box is editable and launch controls submit the same draft", () => {
+  const snapshot = data();
+  const values = { summary: '</textarea><script>alert("x")</script>', approach: "First line\nSecond line", likely_areas: ["src/a.ts", "test/a.test.ts"], size: "M" };
+  const row = issue({ explainer_json: JSON.stringify(values) });
+  const views = ticketComponents(snapshot);
+  const html = views.modal(row);
+  expect(html).toContain('action="/issues/ENG-1/edit-triage" data-triage-edit');
+  expect(html).toContain('name="expected"');
+  expect(html).toContain('name="csrf" value="test-token"');
+  expect(html).toContain("&lt;/textarea&gt;&lt;script&gt;");
+  expect(html).not.toContain('<script>alert("x")');
+  expect(html).toContain("src/a.ts\ntest/a.test.ts");
+  expect(html).toContain('<option value="M" selected>M</option>');
+  expect(html).not.toContain("Edit triage");
+  expect(html).not.toContain('<p class="triage-text"');
+  expect(html).toContain('>Update</button>');
+  expect(html.match(/name="summary"/g)).toHaveLength(1);
+  expect(html).toContain('<form id="triage-ENG-1"');
+  expect(html).toContain('name="repo" form="triage-ENG-1"');
+  expect(html).toContain('name="extra" value="web" form="triage-ENG-1"');
+  expect(html).toContain('name="branch" value="fix-widget-eng-1" form="triage-ENG-1"');
+  expect(html).toContain('form="triage-ENG-1" formaction="/issues/ENG-1/approve"');
+  expect(html).toContain('formaction="/issues/ENG-1/reject" formnovalidate data-skip-triage');
+  expect(views.modal({ ...row, status: "approved" })).not.toContain("data-triage-edit");
+  expect(views.modal({ ...row, status: "running" })).toContain(">Update</button>");
+});
+
 test("running multi-repo tickets use supplied links and expose safety warnings", () => {
   const snapshot = data();
   snapshot.canResendPrompt = true;

@@ -11,6 +11,12 @@ import { log } from "../../shared/log";
 import { redirect, go } from "../http";
 import type { WebContext } from "../context";
 
+const triageInput = (form: FormData) => ({
+  summary: String(form.get("summary") ?? ""), approach: String(form.get("approach") ?? ""),
+  likelyAreas: String(form.get("likelyAreas") ?? ""), size: String(form.get("size") ?? ""),
+  expected: String(form.get("expected") ?? ""),
+});
+
 /** Mutations enter here only after the server verifies the request origin and CSRF token. */
 export async function handleAction(path: string, form: FormData, ctx: WebContext): Promise<Response> {
   const { ap, updater, health, reschedule, configPath, gh } = ctx;
@@ -196,6 +202,14 @@ export async function handleAction(path: string, form: FormData, ctx: WebContext
     const res = ap.resendPrompt(identifier);
     return go("/", res.ok ? "notice" : "error", res.ok ? `Sending ${identifier}'s prompt in the background.` : `${identifier}: ${res.error}`);
   }
+  const editTriage = path.match(/^\/issues\/([^/]+)\/edit-triage$/);
+  if (editTriage) {
+    const identifier = decodeURIComponent(editTriage[1]);
+    const res = ap.saveTriage(identifier, triageInput(form));
+    const location = `/?${res.ok ? "notice" : "error"}=${encodeURIComponent(res.ok ? res.message : res.error)}#m-${encodeURIComponent(identifier)}`;
+    if (form.get("response") === "json") return Response.json({ ...res, location }, { status: res.ok ? 200 : 400 });
+    return redirect(location);
+  }
   const triage = path.match(/^\/issues\/([^/]+)\/triage$/);
   if (triage) {
     const identifier = decodeURIComponent(triage[1]);
@@ -231,10 +245,13 @@ export async function handleAction(path: string, form: FormData, ctx: WebContext
     const identifier = decodeURIComponent(m[1]);
     const res =
       m[2] === "approve"
-        ? ap.approve(identifier, String(form.get("repo") ?? ""), String(form.get("branch") ?? ""), form.getAll("extra").map(String))
+        ? ap.approve(identifier, String(form.get("repo") ?? ""), String(form.get("branch") ?? ""), form.getAll("extra").map(String), form.has("expected") ? triageInput(form) : undefined)
         : ap.reject(identifier);
-    if (!res.ok) return redirect(`/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}`);
-    return redirect(m[2] === "approve" ? "/?logs=1" : "/"); // show the log while it launches
+    const location = res.ok
+      ? m[2] === "approve" ? "/?logs=1" : "/"
+      : `/?error=${encodeURIComponent(`${identifier}: ${res.error}`)}#m-${encodeURIComponent(identifier)}`;
+    if (form.get("response") === "json") return Response.json({ ...res, location }, { status: res.ok ? 200 : 400 });
+    return redirect(location); // show the log while it launches
   }
   return new Response("not found", { status: 404 });
 }
