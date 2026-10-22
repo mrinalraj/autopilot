@@ -8,10 +8,12 @@ Export a section as Markdown with `bun run changelog`, or as JSON with
 `bun run changelog --json`. A version can be supplied, for example
 `bun run changelog 0.1.0-beta.9`. See [the changelog workflow](docs/changelog.md).
 
-Earlier history remains in Git commits, tags and GitHub releases; this file starts with the next
-unreleased changes after `0.1.0-beta.8`.
+Earlier history remains in Git commits, tags and GitHub releases; this file starts with
+`0.1.0-beta.9`.
 
 ## [Unreleased]
+
+## [0.1.0-beta.9] - 2026-10-22
 
 ### Desktop beta installation
 
