@@ -282,6 +282,12 @@ Other polling rules:
 
 All releases so far are pre-releases (`0.1.0-beta.N`); the latest is beta.10.
 
+**Release handoff (2026-10-23):** beta.10 is published and both Homebrew packages are live.
+See [docs/releases/0.1.0-beta.10.md](docs/releases/0.1.0-beta.10.md) for the release/tap commits,
+completed verification, compatibility decisions and remaining manual QA. The release work is
+complete; the earlier release plan is historical. Preserve previous releases and their assets
+so existing download links and pinned installations keep working. Future fixes get a new version.
+
 `CHANGELOG.md` is the source of truth for release notes. Include user-visible changes under
 `Unreleased` in their implementation commit. Committing or pushing does not authorize a release,
 version bump, tag or installation. See [docs/changelog.md](docs/changelog.md) for the workflow;
