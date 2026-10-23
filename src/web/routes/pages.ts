@@ -1,12 +1,10 @@
 import { homedir } from "node:os";
-import { HOME_DIR, LOG_PATH } from "../../config/config";
 import { eventsSince } from "../../shared/log";
-import { repoSources, listRepos } from "../../repos/catalog";
+import { repoSources } from "../../repos/catalog";
 import { suggestFolders } from "../../repos/suggestions";
-import { serviceStatus } from "../../platform/service";
+import { desktopDataId } from "../../platform/desktop";
 import { version as APP_VERSION } from "../../../package.json";
 import { doneSteps, isStep, STEPS } from "../setup";
-import { settingsBody } from "../views/settings";
 import { setupBody } from "../views/setup";
 import { dashboardBody } from "../views/dashboard";
 import { modalId } from "../views/components/ticket-shared";
@@ -16,26 +14,29 @@ import { liveState } from "../state";
 import { serveStatic } from "../static";
 import { page, redirect } from "../http";
 import type { WebContext } from "../context";
+import { settingsData, settingsPage } from "../settings-data";
 
 export async function handlePage(url: URL, ctx: WebContext): Promise<Response> {
-  const { ap, gh, configPath } = ctx;
+  const { ap, gh } = ctx;
   const path = url.pathname;
   const error = url.searchParams.get("error") ?? undefined;
   const notice = url.searchParams.get("notice") ?? undefined;
+  if (path === "/desktop-info") return Response.json({ app: "autopilot", protocol: 1, version: APP_VERSION,
+    data: desktopDataId(ap.cfg), boot: ctx.bootId }, { headers: { "Cache-Control": "no-store" } });
   if (path === "/events") return Response.json(eventsSince(Number(url.searchParams.get("since") ?? 0)), { headers: { "Cache-Control": "no-store" } });
   if (path === "/state") return Response.json(liveState(ctx), { headers: { "Cache-Control": "no-store" } });
   const file = serveStatic(path, ap.cfg.port);
   if (file) return file;
   if (path === "/healthz") return Response.json({ ok: true, lastPollAt: ap.lastPollAt, lastPollError: ap.lastPollError, progress: ap.progress });
-  if (path === "/settings") {
-    const [statuses, teamKeys, account] = await Promise.all([ap.statusOptions(), ap.teamKeys(), ap.account().catch(() => null)]);
-    return page("Settings · Autopilot", settingsBody({
-      cfg: ap.cfg, repos: listRepos(ap.cfg), paths: { config: configPath, home: HOME_DIR, log: LOG_PATH },
-      tracker: ap.trackerLabel, account, signingIn: ap.signingIn, tokenField: csrfField(ctx.csrf),
-      statuses, ghAccounts: gh().accounts.map((a) => a.name), teamKeys,
-      version: APP_VERSION, service: serviceStatus(), dismissedTips: ap.store.dismissedBanners().size, error, notice,
-    }));
+  if (path === "/settings/data") {
+    try {
+      const data = await settingsData(ctx, url.searchParams.get("part") ?? "", url.searchParams.get("refresh") === "1");
+      return Response.json({ ok: true, data }, { headers: { "Cache-Control": "no-store" } });
+    } catch (err) {
+      return Response.json({ ok: false, error: (err as Error).message }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
   }
+  if (path === "/settings") return page("Settings · Autopilot", settingsPage(ctx, error, notice));
   if (path === "/" && !ap.cfg.onboarded) return redirect("/setup");
   if (path === "/") {
     const data = await dashboardData(ctx, error, notice);

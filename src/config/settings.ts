@@ -51,7 +51,7 @@ export function addPicked(cfg: Config, picked: string[], path = CONFIG_PATH): st
 
 /** Pickup/import statuses from a form; each tracker keeps its own (Linear's at the top level, for older configs). */
 export function writeStatuses(raw: Raw, cfg: Config, form: FormData) {
-  const states = { pickupStates: list(form, "pickupStates", "pickupStatesOther"), importStates: list(form, "importStates", "importStatesOther") };
+  const states = { pickupStates: form.get("pickupMode") === "any" ? [] : list(form, "pickupStates", "pickupStatesOther"), importStates: list(form, "importStates", "importStatesOther") };
   if (cfg.tracker === "jira") raw.jira = { ...raw.jira, ...states };
   else Object.assign(raw, states);
   raw.importWorktrees = form.get("importWorktrees") === "on";
@@ -61,6 +61,7 @@ export interface SaveResult {
   errors: string[];
   /** Changes that only take effect after a restart (or another step). */
   notes: string[];
+  fields?: Record<string, string>;
 }
 
 const list = (form: FormData, name: string, other: string) =>
@@ -71,75 +72,79 @@ const list = (form: FormData, name: string, other: string) =>
  * applies the new values to the running config in place.
  */
 export function saveSettings(cfg: Config, form: FormData, path = CONFIG_PATH): SaveResult {
-  const errors: string[] = [];
-  const notes: string[] = [];
+  const errors: string[] = [], notes: string[] = [];
+  const fields: Record<string, string> = {};
+  const section = String(form.get("section") ?? "");
+  const sections = ["connections", "tickets", "repositories", "launch", "ai"];
+  if (section && !sections.includes(section)) return { errors: ["Unknown settings section."], notes };
+  const editing = (name: string) => !section || section === name;
+  const error = (name: string, message: string) => { errors.push(message); fields[name] = message; };
   const num = (name: string, min: number, max: number, label: string) => {
-    const v = Number(form.get(name));
-    if (!Number.isFinite(v) || v < min || v > max) errors.push(`${label} must be between ${min} and ${max}.`);
-    return v;
+    const value = Number(form.get(name));
+    if (!form.has(name) || !Number.isFinite(value) || value < min || value > max) error(name, `${label} must be between ${min} and ${max}.`);
+    return value;
   };
-
-  const pollMinutes = num("pollMinutes", 1, 1440, "Poll interval (minutes)");
-  const workMinutes = num("workMinutes", 1, 1440, "PR check interval (minutes)");
-  const threshold = num("lowConfidenceThreshold", 0, 1, "Low-confidence threshold");
-  const lines = (name: string) => String(form.get(name) ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
-  const repoRoots = lines("repoRoots");
-  const repoPaths = lines("repoPaths");
-  errors.push(...checkRepos(repoRoots, repoPaths));
-  const ticketPrefixes = String(form.get("ticketPrefixes") ?? "").split(/[\s,]+/).map((p) => p.trim().toUpperCase()).filter(Boolean);
-  for (const p of ticketPrefixes) if (!/^[A-Z][A-Z0-9]{0,9}$/.test(p)) errors.push(`Ticket prefix "${p}" should be letters/digits, like ENG.`);
+  const pollMinutes = editing("tickets") ? num("pollMinutes", 1, 1440, "Poll interval (minutes)") : 0;
+  const workMinutes = editing("tickets") ? num("workMinutes", 1, 1440, "PR check interval (minutes)") : 0;
+  if (editing("tickets") && form.get("pickupMode") === "selected" && !list(form, "pickupStates", "pickupStatesOther").length) error("pickupMode", "Choose at least one status, or explicitly choose Any open status.");
+  const threshold = editing("ai") ? num("lowConfidenceThreshold", 0, 1, "Low-confidence threshold") : 0;
+  const lines = (name: string) => String(form.get(name) ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+  const roots = lines("repoRoots"), paths = lines("repoPaths");
+  if (editing("repositories")) {
+    for (const message of checkRepos(roots, paths)) error("repoRoots", message);
+  }
+  const prefixes = String(form.get("ticketPrefixes") ?? "").split(/[\s,]+/).map((p) => p.trim().toUpperCase()).filter(Boolean);
+  if (editing("tickets")) for (const p of prefixes) if (!/^[A-Z][A-Z0-9]{0,9}$/.test(p)) error("ticketPrefixes", `Ticket prefix "${p}" should be letters/digits, like ENG.`);
   const launcher = String(form.get("launcher") ?? "") as LauncherName;
-  if (!LAUNCHERS.includes(launcher)) errors.push("Pick a launcher.");
   const terminal = String(form.get("terminal") ?? "terminal");
-  if (!["terminal", "iterm", "warp", "none"].includes(terminal)) errors.push("Pick a terminal.");
-  const provider = String(form.get("provider") ?? "cli");
-  if (!["cli", "api"].includes(provider)) errors.push("Pick an LLM backend.");
-  const model = String(form.get("model") ?? "").trim();
-  if (!model) errors.push("Model can't be empty.");
-  if (errors.length) return { errors, notes };
-
+  if (editing("launch")) {
+    if (!LAUNCHERS.includes(launcher)) error("launcher", "Pick a launcher.");
+    if (!["terminal", "iterm", "warp", "none"].includes(terminal)) error("terminal", "Pick a terminal.");
+  }
+  const provider = String(form.get("provider") ?? "cli"), model = String(form.get("model") ?? "").trim();
+  if (editing("ai")) {
+    if (!["cli", "api"].includes(provider)) error("provider", "Pick an LLM backend.");
+    if (!model) error("model", "Model can't be empty.");
+  }
+  if (errors.length) return { errors, notes, fields };
   const raw = readRaw(path);
-  const before = { provider: cfg.llm.provider, move: cfg.moveToInProgressOnApprove };
-
-  writeStatuses(raw, cfg, form);
-  raw.pollIntervalSeconds = Math.round(pollMinutes * 60);
-  raw.workCheckIntervalSeconds = Math.round(workMinutes * 60);
-  writeRepos(raw, repoRoots, repoPaths);
-  raw.ticketPrefixes = ticketPrefixes;
-  raw.githubUser = String(form.get("githubUser") ?? "");
-  raw.moveToInProgressOnApprove = form.get("moveToInProgressOnApprove") === "on";
-  raw.lowConfidenceThreshold = threshold;
-  raw.llm = { ...raw.llm, provider, model };
-  raw.launch = {
-    ...raw.launch,
-    launcher,
-    terminal,
+  if (editing("tickets")) {
+    writeStatuses(raw, cfg, form);
+    raw.pollIntervalSeconds = Math.round(pollMinutes * 60);
+    raw.workCheckIntervalSeconds = Math.round(workMinutes * 60);
+    raw.ticketPrefixes = prefixes;
+    raw.moveToInProgressOnApprove = form.get("moveToInProgressOnApprove") === "on";
+    if (raw.moveToInProgressOnApprove && !cfg.moveToInProgressOnApprove && cfg.tracker === "linear") notes.push("Moving tickets to In Progress needs Linear write access: sign in again (Switch account) once.");
+  }
+  if (editing("connections")) raw.githubUser = String(form.get("githubUser") ?? "");
+  if (editing("ai")) {
+    raw.lowConfidenceThreshold = threshold;
+    raw.llm = { ...raw.llm, provider, model };
+    if (provider !== cfg.llm.provider) notes.push("The LLM backend changes after a restart.");
+  }
+  if (editing("launch")) raw.launch = {
+    ...raw.launch, launcher, terminal,
     worktreesDir: String(form.get("worktreesDir") ?? "").trim(),
-    fetch: form.get("fetch") === "on",
-    base: String(form.get("base") ?? "").trim(),
-    background: form.get("background") === "on",
+    fetch: form.get("fetch") === "on", base: String(form.get("base") ?? "").trim(), background: form.get("background") === "on",
     ideSession: form.get("ideSession") === "terminal" ? "terminal" : "chat",
     cursorChat: form.get("cursorChat") === "claude" ? "claude" : "cursor",
   };
-
-  // Repo catalog: descriptions that differ from the derived ones, and exclusions.
-  const repos: Record<string, { description?: string; exclude?: boolean }> = {};
-  for (const r of listRepos({ ...cfg, repoRoots: repoRoots.map(expandHome), repoPaths: repoPaths.map(expandHome) })) {
-    const desc = String(form.get(`desc:${r.name}`) ?? "").trim();
-    const entry: { description?: string; exclude?: boolean } = {};
-    if (desc && desc !== r.derived) entry.description = desc;
-    if (form.has(`present:${r.name}`) && form.get(`include:${r.name}`) !== "on") entry.exclude = true;
-    if (Object.keys(entry).length) repos[r.name] = entry;
+  if (editing("repositories")) {
+    writeRepos(raw, roots, paths);
+    const repos: Config["repos"] = {};
+    for (const r of listRepos({ ...cfg, repoRoots: roots.map(expandHome), repoPaths: paths.map(expandHome) })) {
+      // The catalogue may still be loading: preserve overrides for controls not submitted.
+      if (!form.has(`present:${r.name}`)) { if (cfg.repos[r.name]) repos[r.name] = cfg.repos[r.name]; continue; }
+      const entry: Config["repos"][string] = {};
+      const desc = String(form.get(`desc:${r.name}`) ?? "").trim();
+      if (desc && desc !== r.derived) entry.description = desc;
+      if (form.get(`include:${r.name}`) !== "on") entry.exclude = true;
+      if (Object.keys(entry).length) repos[r.name] = entry;
+    }
+    raw.repos = repos;
   }
-  raw.repos = repos;
-
   writeFileSync(path, JSON.stringify(raw, null, 2) + "\n");
   Object.assign(cfg, loadConfig(path));
-
-  if (provider !== before.provider) notes.push("The LLM backend changes after a restart.");
-  if (raw.moveToInProgressOnApprove && !before.move && cfg.tracker === "linear") {
-    notes.push("Moving tickets to In Progress needs Linear write access: sign in again (Switch account) once.");
-  }
   return { errors, notes };
 }
 

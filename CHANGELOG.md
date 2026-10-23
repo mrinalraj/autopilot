@@ -13,6 +13,49 @@ Earlier history remains in Git commits, tags and GitHub releases; this file star
 
 ## [Unreleased]
 
+### Public beta installation and upgrades
+
+- Install the background service with `brew install --formula mrinalraj/tap/autopilot`, then
+  `brew services start autopilot` and `autopilot open`. Add the optional native window with
+  `brew install --cask mrinalraj/tap/autopilot` and `open -a Autopilot`.
+- Existing formula users: run `brew update`, `brew upgrade --formula autopilot`, then
+  `brew services restart autopilot` before adding the app. Keep the formula installed.
+- Existing beta.9 cask users: quit Autopilot, run `brew update` and `brew upgrade --cask autopilot`.
+  App-only use still works. To add the independent service, install and start the formula before
+  reopening the app. Upgrade the cask first so its old CLI link can be handed over to the formula.
+- Settings, tickets and Keychain sign-ins are shared and preserved. Use a normal upgrade;
+  the old beta.9 cask's `--zap` option deletes shared app data. The new cask's zap rules preserve it.
+- Upgrade the formula and cask separately when both are installed. An attached app displays the
+  formula daemon's web UI, so upgrading only the app does not upgrade that interface.
+- This public beta is **ad-hoc signed and not notarized**. After trying to open a downloaded app,
+  use **System Settings → Privacy & Security → Open Anyway** if macOS blocks it, then confirm.
+  See [Apple's first-launch instructions](https://support.apple.com/en-us/102445).
+- Older releases and their assets remain available for existing installations and download links.
+  Beta versions continue to receive update notifications for newer public betas.
+
+### Added
+
+- A dismissible web health banner offers the optional native app, with install/open commands
+  and the manual macOS first-launch approval warning. Native windows hide browser installation tips.
+- The app connects to a compatible running formula service using the same data, without stopping
+  or uninstalling it. It reconnects after service restarts and leaves the service running on Quit.
+  With no listener, the app still starts and manages its own worker. Formula versions through
+  beta.9 need an upgrade and a normal service restart before accepting app connections.
+
+### Changed
+
+- Installation instructions lead with the Homebrew formula and browser workflow, with the native
+  app as an optional addition and an explicit manual first-launch approval warning.
+- The cask installs only the app, leaving the CLI to the formula. App uninstall and `--zap` preserve
+  shared settings and tickets. Formula updates explicitly select `--formula` when both are installed.
+- Web health banners refresh when checks change, even when the ticket queue is unchanged.
+- Settings opens without waiting for account, repository or service checks, and groups controls
+  into six sections with independent saves, retained drafts and inline validation.
+- Dashboard cards use a denser grid with repository, project, age and work summaries. Logs reserve
+  their own bottom pane or side column. Headers and Settings navigation stay visible as content scrolls.
+- Navigation, dialogs, log panels and saves provide motion and immediate feedback, with reduced-motion
+  support, stable loading buttons, keyboard focus containment and improved status/button contrast.
+
 ## [0.1.0-beta.9] - 2026-10-22
 
 ### Desktop beta installation

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -86,6 +86,15 @@ test("updating a desktop install cannot replace its signed helper", async () => 
   await expect(u.installStandalone(info, "/Applications/Autopilot.app/Contents/Helpers/autopilot")).rejects.toThrow("bundled executables cannot be replaced");
 });
 
+test("a formula update cannot also upgrade an installed cask", () => {
+  const spawn = spyOn(Bun, "spawnSync").mockReturnValue({ exitCode: 0, stderr: Buffer.alloc(0) } as any);
+  try {
+    u.installHomebrew();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect((spawn.mock.calls[0][0] as string[]).slice(1)).toEqual(["upgrade", "--formula", "autopilot"]);
+  } finally { spawn.mockRestore(); }
+});
+
 test("finds the newer release and this machine's asset", async () => {
   const info = (await u.checkForUpdate())!;
   expect(info.available).toBe(true);
@@ -116,4 +125,19 @@ test("betas follow betas; a release install only follows releases", () => {
   expect(u.pickRelease(list, "0.1.0-beta.7")?.tag_name).toBe("v0.2.0-beta.1");
   expect(u.pickRelease(list, "0.1.0")?.tag_name).toBe("v0.1.0");
   expect(u.pickRelease([], "0.1.0-beta.7")).toBeNull();
+});
+
+test("existing public betas select beta.10, then keep discovering subsequent releases", () => {
+  const release = (number: number, draft = false) => ({ tag_name: `v0.1.0-beta.${number}`, prerelease: true, draft, html_url: "https://example.test/release" });
+  const history = [release(11, true), release(10), ...Array.from({ length: 9 }, (_, n) => release(9 - n))];
+  for (let n = 1; n <= 9; n++) {
+    const current = `0.1.0-beta.${n}`;
+    const selected = u.pickRelease(history, current)!;
+    expect(selected.tag_name).toBe("v0.1.0-beta.10");
+    expect(u.newer(selected.tag_name, current)).toBe(true);
+  }
+  expect(u.newer(u.pickRelease(history, "0.1.0-beta.10")!.tag_name, "0.1.0-beta.10")).toBe(false);
+  history[0].draft = false;
+  expect(u.pickRelease(history, "0.1.0-beta.10")?.tag_name).toBe("v0.1.0-beta.11");
+  expect(u.newer("0.1.0-beta.11", "0.1.0-beta.10")).toBe(true);
 });

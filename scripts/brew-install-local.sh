@@ -10,10 +10,6 @@ case "${1:-}" in
   *) echo "usage: brew-install-local.sh [--cask|--formula]" >&2; exit 1;;
 esac
 if [ "$KIND" = cask ]; then
-  if brew list --formula autopilot >/dev/null 2>&1; then
-    echo "Stop and remove the old formula first: brew services stop autopilot && brew uninstall --formula autopilot" >&2
-    exit 1
-  fi
   bun run build:app
 else
   bun run build
@@ -31,4 +27,4 @@ if brew list "--$KIND" autopilot >/dev/null 2>&1; then
 else
   brew install "--$KIND" "$TAP/autopilot"
 fi
-autopilot version
+if [ "$KIND" = formula ]; then autopilot version; fi

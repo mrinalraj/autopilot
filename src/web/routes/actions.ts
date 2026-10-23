@@ -8,7 +8,8 @@ import { resetTickets } from "../../app/reset";
 import { managedByLaunchd } from "../../updates/update";
 import { desktopEvent, isDesktop } from "../../platform/desktop";
 import { log } from "../../shared/log";
-import { redirect, go } from "../http";
+import { redirect, go, page } from "../http";
+import { invalidateSettings, settingsPage } from "../settings-data";
 import type { WebContext } from "../context";
 
 const triageInput = (form: FormData) => ({
@@ -35,13 +36,18 @@ export async function handleAction(path: string, form: FormData, ctx: WebContext
     return redirect("/");
   }
   if (path === "/settings") {
+    const json = form.get("response") === "json";
+    const failure = (message: string, fields: Record<string, string> = {}) => json
+      ? Response.json({ ok: false, error: message, fields }, { status: 400 })
+      : page("Settings · Autopilot", settingsPage(ctx, message, undefined, form));
     const githubBefore = ap.cfg.githubUser;
     const launcherBefore = ap.cfg.launch.launcher;
-    if (form.get("launcher") !== launcherBefore && ap.launcherBusy) {
-      return go("/settings", "error", "A ticket action is still running. Save the launcher change after it finishes.");
+    if (form.has("launcher") && form.get("launcher") !== launcherBefore && ap.launcherBusy) {
+      return failure("A ticket action is still running. Save the launcher change after it finishes.", { launcher: "Wait for the running ticket action to finish." });
     }
     const res = saveSettings(ap.cfg, form, configPath);
-    if (res.errors.length) return redirect(`/settings?error=${encodeURIComponent(res.errors.join(" "))}`);
+    if (res.errors.length) return failure(res.errors.join(" "), res.fields);
+    invalidateSettings(ctx);
     if (ap.cfg.launch.launcher !== launcherBefore) {
       ap.reconfigureLaunchers();
       res.notes.push("Existing worktrees are being configured for the selected launcher. Failed setup retries automatically; completed setup is remembered.");
@@ -52,7 +58,9 @@ export async function handleAction(path: string, form: FormData, ctx: WebContext
     }
     reschedule?.();
     void health?.refresh();
-    return redirect(`/settings?notice=${encodeURIComponent(["Saved.", ...res.notes].join(" "))}`);
+    const notice = ["Saved.", ...res.notes].join(" ");
+    if (json) return Response.json({ ok: true, notice });
+    return redirect(`/settings?notice=${encodeURIComponent(notice)}#${encodeURIComponent(String(form.get("section") || "connections"))}`);
   }
   if (path === "/actions/reset") {
     try {
@@ -115,12 +123,18 @@ export async function handleAction(path: string, form: FormData, ctx: WebContext
     const back = form.get("from") === "setup" ? "/setup?step=repos" : "/settings";
     try {
       const picked = await chooseFolders();
+      if (form.get("response") === "json") {
+        const { existsSync } = await import("node:fs");
+        const { join } = await import("node:path");
+        return Response.json({ ok: true, folders: (picked ?? []).map((p) => ({ path: p, repo: existsSync(join(p, ".git")) })) });
+      }
       if (!picked?.length) return redirect(back);
       const errors = addPicked(ap.cfg, picked, configPath);
       if (errors.length) return go(back, "error", errors.join(" "));
       void health?.refresh();
       return go(back, "notice", `Added ${picked.map((p) => p.replace(/\/$/, "").split("/").pop()).join(", ")}.`);
     } catch (err) {
+      if (form.get("response") === "json") return Response.json({ ok: false, error: `Couldn't open Finder: ${(err as Error).message}` }, { status: 400 });
       return go(back, "error", `Couldn't open the folder picker (${(err as Error).message}); type the paths instead.`);
     }
   }

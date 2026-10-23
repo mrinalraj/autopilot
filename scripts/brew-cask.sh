@@ -38,19 +38,19 @@ cask "autopilot" do
   depends_on macos: :ventura
 
   app "Autopilot.app"
-  binary "#{appdir}/Autopilot.app/Contents/Helpers/autopilot"
 
   uninstall quit: "dev.autopilot.app"
 
   zap trash: [
-    "~/Library/Application Support/autopilot",
     "~/Library/Logs/Autopilot",
     "~/Library/Preferences/dev.autopilot.app.plist",
     "~/Library/Saved Application State/dev.autopilot.app.savedState",
   ]
 
   caveats <<~EOS
-    Open Autopilot from Applications to finish setup. It manages its own worker.
+    Open Autopilot from Applications to finish setup.
+    If the formula service is running, the app connects to it and leaves it running on Quit.
+    Otherwise the app starts its own worker, which stops on Quit.
     Enable Autopilot > Open at Login to start it when you sign in.
     Claude Code must be installed and logged in.
 
@@ -58,10 +58,11 @@ cask "autopilot" do
     use System Settings > Privacy & Security > Open Anyway and confirm.
     Signing status and instructions: https://github.com/${REPO}/releases/tag/v${VERSION}
 
-    Migrating from the formula: stop its service and uninstall the formula first:
-      brew services stop autopilot
-      brew uninstall --formula autopilot
-    Your settings, tickets and Keychain sign-in are preserved.
+    You can keep the formula installed and running. It supplies the autopilot CLI.
+    Older formulas need an upgrade and service restart to support app connections:
+      brew upgrade --formula autopilot
+      brew services restart autopilot
+    Uninstalling this app preserves shared settings, tickets and Keychain sign-in, even with --zap.
   EOS
 end
 RUBY

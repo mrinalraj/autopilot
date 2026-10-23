@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var statusText: NSTextField!
     private var statusItem: NSStatusItem!
     private var loginItem: NSMenuItem!
+    private var workerStatus: NSMenuItem!
+    private var externalWorker = false
     private var worker: Process?
     private var input: Pipe?
     private var output: Pipe?
@@ -95,6 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "paperplane.fill", accessibilityDescription: "Autopilot")
         let menu = NSMenu()
+        workerStatus = NSMenuItem(title: "Starting Autopilot…", action: nil, keyEquivalent: "")
+        menu.addItem(workerStatus)
+        menu.addItem(.separator())
         menu.addItem(menuItem("Show Autopilot", #selector(showWindow)))
         menu.addItem(menuItem("Settings…", #selector(settings)))
         menu.addItem(menuItem("Show Logs", #selector(showLogs)))
@@ -114,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let content = NSView()
         window.contentView = content
         let config = WKWebViewConfiguration()
+        config.applicationNameForUserAgent = "AutopilotDesktop/1"
         // Browser storage and workers are unnecessary: the host owns the offline/startup UI.
         config.websiteDataStore = .nonPersistent()
         webView = WKWebView(frame: .zero, configuration: config)
@@ -157,6 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         process.arguments = ["desktop"]
         var env = ProcessInfo.processInfo.environment
         env["AUTOPILOT_DESKTOP"] = "1"
+        if externalWorker { env["AUTOPILOT_DESKTOP_ATTACH_ONLY"] = "1" }
         process.environment = env
         process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
         let stdin = Pipe(), stdout = Pipe()
@@ -212,11 +219,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func handleEvent(_ event: [String: Any]) {
         switch event["type"] as? String {
         case "restarting": restarts = 0
+        case "disconnected":
+            externalWorker = true
+            startupTimer?.invalidate(); badgeTimer?.invalidate()
+            baseURL = nil
+            NSApp.dockTile.badgeLabel = nil
+            workerStatus.title = "Waiting for background service"
+            showStatus(event["message"] as? String ?? "Reconnecting to the background service…")
         case "ready":
             guard baseURL == nil, let raw = event["url"] as? String, let url = URL(string: raw),
                   url.scheme == "http", url.host == "127.0.0.1", let port = url.port, (1...65535).contains(port),
                   url.user == nil, url.password == nil, url.path.isEmpty || url.path == "/" else { return }
             startupTimer?.invalidate()
+            externalWorker = event["ownership"] as? String == "external"
+            workerStatus.title = externalWorker ? "Using background service · Quit leaves it running" : "App manages worker · Quit stops it"
             baseURL = url
             webView.load(URLRequest(url: pendingURL.flatMap { isLocal($0) ? $0 : nil } ?? url))
             pendingURL = nil
@@ -246,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         baseURL = nil
         NSApp.dockTile.badgeLabel = nil
         if quitting { finishTermination(); return }
-        if wasReady && restarts < 3 {
+        if (wasReady || externalWorker) && restarts < 3 {
             restarts += 1
             showStatus("Reconnecting to Autopilot…")
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.startWorker() }

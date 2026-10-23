@@ -47,14 +47,14 @@ export function progressBanner(data: ProgressViewData): { html: string } {
   if (p.total > 0) {
     const pct = Math.round((p.done / p.total) * 100);
     return {
-      html: `<div class="progress"><div class="row"><div class="spinner"></div>
+      html: `<div class="progress" role="status"><div class="row"><div class="spinner"></div>
         <strong>Triaging ${esc(p.current ?? "")}</strong><span class="muted">${Math.min(p.done + 1, p.total)} of ${p.total} · picking repo, branch and writing the explainer</span></div>
-        <div class="bar"><div style="width:${Math.max(pct, 4)}%"></div></div></div>`,
+        <div class="bar"><div style="transform:scaleX(${Math.max(pct, 4) / 100})"></div></div></div>`,
     };
   }
   const activity = data.activity;
   if (activity) {
-    return { html: `<div class="progress"><div class="row"><div class="spinner"></div><strong>${esc(activity)}</strong></div></div>` };
+    return { html: `<div class="progress" role="status"><div class="row"><div class="spinner"></div><strong>${esc(activity)}</strong><span class="muted"></span></div><div class="bar" hidden><div></div></div></div>` };
   }
   return { html: "" };
 }
@@ -63,8 +63,8 @@ export function progressBanner(data: ProgressViewData): { html: string } {
 export function logPanel(recent: LogEvent[]): string {
   const line = (e: (typeof recent)[number]) =>
     `<div class="ln ${e.level}"><span class="ts">${esc(new Date(e.at).toTimeString().slice(0, 8))}</span>${esc(e.msg)}</div>`;
-  return `<aside id="logs" class="logs" aria-label="Activity log" data-last="${recent.at(-1)?.id ?? 0}">
+  return `<aside id="logs" class="logs" aria-label="Activity log" data-last="${recent.at(-1)?.id ?? 0}" hidden inert>
     <div class="logs-head"><strong>Activity</strong><span class="muted small">live · since the daemon started</span>
       <button type="button" class="x" id="logclose" aria-label="Close log">×</button></div>
-    <div class="logs-body" id="logbody">${recent.map(line).join("") || `<div class="ln muted">Nothing yet.</div>`}</div></aside>`;
+    <div class="logs-body" id="logbody" tabindex="0" aria-label="Log output">${recent.map(line).join("") || `<div class="ln muted">Nothing yet.</div>`}</div></aside>`;
 }

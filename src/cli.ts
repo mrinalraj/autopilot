@@ -32,9 +32,9 @@ try {
       await (await import("./app/daemon")).runDaemon();
       break;
     case "desktop": {
-      const { desktopEvent, watchDesktopHost } = await import("./platform/desktop");
+      const { watchDesktopHost } = await import("./platform/desktop");
       watchDesktopHost();
-      await (await import("./app/daemon")).runDaemon({ onReady: (url) => desktopEvent({ type: "ready", url }) });
+      await (await import("./app/desktop")).runDesktop();
       break;
     }
     case "once":

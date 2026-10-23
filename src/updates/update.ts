@@ -150,7 +150,7 @@ export async function installStandalone(info: UpdateInfo, target = process.execP
 export function installHomebrew(): void {
   const brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].find((p) => Bun.file(p).size > 0) ?? "brew";
   // Homebrew refreshes taps at most daily on its own; force it, or a just-published release looks absent.
-  const r = Bun.spawnSync([brew, "upgrade", "autopilot"], {
+  const r = Bun.spawnSync([brew, "upgrade", "--formula", "autopilot"], {
     stdout: "pipe", stderr: "pipe", env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: "", HOMEBREW_AUTO_UPDATE_SECS: "0" },
   });
   if (r.exitCode !== 0) throw new Error(`brew upgrade failed: ${`${r.stderr}`.trim().slice(-500)}`);

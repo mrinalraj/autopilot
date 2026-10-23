@@ -1,176 +1,102 @@
-import { statusPicker } from "./components/status-picker";
 import type { Config } from "../../config/config";
-import type { RepoSettings } from "../../repos/catalog";
 import { esc } from "./escape";
 
 export interface SettingsData {
   cfg: Config;
-  repos: RepoSettings[];
-  paths: { config: string; home: string; log: string };
-  /** "Linear" or "Jira". */
-  tracker: string;
-  /** Signed-in tracker account, null when signed out. */
-  account: { name: string; email: string | null } | null;
-  signingIn: boolean;
-  /** My teams' (Jira: projects') keys, the default ticket prefixes. */
-  teamKeys: string[];
-  tokenField: string;
-  statuses: { team: string; name: string; type: string }[];
-  ghAccounts: string[];
   version: string;
-  service: string;
+  paths: { config: string; home: string; log: string };
+  tracker: string;
+  signingIn: boolean;
+  tokenField: string;
   dismissedTips: number;
   error?: string;
   notice?: string;
+  draft?: FormData;
 }
 
-const checked = (on: boolean) => (on ? " checked" : "");
-const selected = (on: boolean) => (on ? " selected" : "");
-
 export function settingsBody(d: SettingsData): string {
-  const { cfg, tokenField } = d;
-  const repos = d.repos;
-  const launchers: [string, string][] = [
-    ["supacode", "Supacode: worktree and Claude tab in Supacode"],
-    ["superset", "Superset: worktree and Claude terminal in Superset"],
-    ["worktrunk", "Worktrunk: wt switch --create (with its hooks), Claude in your terminal"],
-    ["git", "git worktree: plain git worktrees, Claude in your terminal"],
-    ["vscode", "VS Code: git worktrees opened in VS Code, Claude in its chat panel (or a terminal)"],
-    ["cursor", "Cursor: git worktrees opened in Cursor, prompt in its chat panel (or a terminal)"],
-  ];
-  const t = esc(d.tracker);
-  const teams = cfg.tracker === "jira" ? "projects" : "teams";
-  const other = cfg.tracker === "jira" ? "Linear" : "Jira";
-  const action = (path: string, label: string, busy: string, cls = "") =>
-    `<form method="post" action="${path}">${tokenField}<button class="${cls}" data-busy-label="${busy}">${label}</button></form>`;
+  const { cfg, tokenField, draft } = d;
+  const selected = (a: string, b: string) => a === b ? " selected" : "";
+  const value = (name: string, fallback: string) => String(draft?.get(name) ?? fallback);
+  const text = (name: string, label: string, fallback: string, attrs = "") => `<div class="field"><label for="${name}">${label}</label><input id="${name}" name="${name}" type="text" value="${esc(value(name, fallback))}" ${attrs}></div>`;
+  const area = (name: string, label: string, values: string[]) => `<div class="field"><label for="${name}">${label}</label><textarea id="${name}" name="${name}" rows="2">${esc(value(name, values.join("\n")))}</textarea></div>`;
+  const number = (name: string, label: string, val: number, attrs: string) => `<div class="field"><label for="${name}">${label}</label><input id="${name}" name="${name}" type="number" value="${esc(value(name, String(val)))}" required ${attrs}></div>`;
+  const check = (name: string, label: string, on: boolean, section: string) => `<label class="check"><input type="checkbox" name="${name}"${(draft?.get("section") === section ? draft.has(name) : on) ? " checked" : ""}> ${label}</label>`;
+  const select = (name: string, label: string, current: string, options: [string, string][], attrs = "") => `<div class="field" ${attrs}><label for="${name}">${label}</label><select id="${name}" name="${name}">${options.map(([v, l]) => `<option value="${v}"${selected(value(name, current), v)}>${l}</option>`).join("")}</select></div>`;
+  const save = (section: string, title: string, content: string) => `<form method="post" action="/settings" data-settings-form data-section="${section}">${tokenField}<input type="hidden" name="section" value="${section}">
+    <h2>${title}</h2>${content}<div class="alert form-error" role="alert" tabindex="-1" hidden></div>
+    <div class="savebar"><span class="save-state muted small" role="status">No unsaved changes</span><button class="primary" type="submit" data-busy-label="Saving…">Save ${title.toLowerCase()}</button></div></form>`;
+  const action = (path: string, label: string, busy: string, cls = "") => `<form method="post" action="${path}">${tokenField}<button class="${cls}" data-busy-label="${busy}">${label}</button></form>`;
+  const metadata = (part: string, label: string) => `<div class="metadata-status small muted" data-check="${part}" role="status">${label}</div><button type="button" class="quiet" data-retry="${part}" hidden>Retry check</button>`;
+  const statuses = (name: string, current: string[], label: string) => {
+    const values = draft?.get("section") === "tickets" ? draft.getAll(name).map(String) : current;
+    return `<fieldset class="status-picker"><legend>${label}</legend><div class="opts" data-status-options="${name}">${values.map((s) => `<label class="opt"><input type="checkbox" name="${name}" value="${esc(s)}" checked>${esc(s)}</label>`).join("")}</div>
+      <details><summary>Add a custom status</summary>${text(name + "Other", "Status names, separated by commas", "")}</details></fieldset>`;
+  };
+  const nav: [string, string, string][] = [["connections", "Connections", "Tracker & GitHub"], ["tickets", "Tickets", "What to watch"], ["repositories", "Repositories", "Folders & routing"], ["launch", "Launch", "Workspace & editor"], ["ai", "AI", "Triage & review"], ["advanced", "Advanced", "Diagnostics & data"]];
 
-  return `<div class="top"><div class="brand"><a class="logo" href="/" style="color:#fff;text-decoration:none">L</a><div><h1>Settings</h1>
-      <div class="muted small"><a href="/">← Back to tickets</a></div></div></div></div>
-    ${d.error ? `<div class="alert" style="margin-top:14px">${esc(d.error)}</div>` : ""}
-    ${d.notice ? `<div class="notice">${esc(d.notice)}</div>` : ""}
-    <section class="box" style="margin-top:16px"><h3>${t} account</h3>
-      ${
-        d.signingIn
-          ? `<div class="step" id="signin-wait"><span class="spinner"></span><span>Waiting for you to approve in the browser tab that just opened…</span></div>`
-          : d.account
-            ? `<p style="margin:0 0 12px">Signed in as <strong>${esc(d.account.name)}</strong>${d.account.email ? ` <span class="muted">${esc(d.account.email)}</span>` : ""}</p>`
-            : `<p style="margin:0 0 12px">Not signed in. Tickets aren't checked until you sign in.</p>`
-      }
-      <div class="row">${
-        d.account
-          ? `${action("/actions/signin", "Switch account", `Opening ${t}…`)}${action("/actions/signout", "Sign out", "Signing out…", "ghost-danger")}`
-          : action("/actions/signin", `Sign in to ${t}`, `Opening ${t}…`, "primary")
-      }</div>
-      <div class="muted small" style="margin-top:8px">Sign-in happens in your browser through ${t}'s own page; credentials stay in the macOS Keychain.</div>
-      <form method="post" action="/actions/switch-tracker" class="settings" style="margin-top:14px">${tokenField}
-        <div class="pair"><div><label for="tracker">Issue tracker</label>
-          <select id="tracker" name="tracker">
-            <option value="linear"${selected(cfg.tracker === "linear")}>Linear</option>
-            <option value="jira"${selected(cfg.tracker === "jira")}>Jira Cloud</option></select></div>
-        <div><label for="jiraSite">Jira site (if you can reach several)</label>
-          <input type="text" id="jiraSite" name="jiraSite" value="${esc(cfg.jira.site)}" placeholder="acme.atlassian.net"></div></div>
-        <div class="row" style="margin-top:10px"><button type="submit" data-busy-label="Switching…">Save tracker</button></div>
-        <div class="muted small" style="margin-top:4px">One tracker at a time; each keeps its own tickets and sign-in, so switching back to ${other} later picks up where it left off.</div>
-      </form>
-    </section>
-
-    <form method="post" action="/settings" class="settings">${tokenField}
-      <section class="box"><h3>${t}</h3>
-        <label>Pick up tickets in</label>
-        ${statusPicker("pickupStates", cfg.pickupStates, d.statuses, "A ticket assigned to you is triaged when it enters one of these. None ticked = any open status.", d.tracker)}
-        <label>Also show my tickets in</label>
-        ${statusPicker("importStates", cfg.importStates, d.statuses, "Shown under In progress without triage, linked to their worktree when one exists.", d.tracker)}
-        <label class="check"><input type="checkbox" name="importWorktrees"${checked(cfg.importWorktrees)}> Scan worktrees for ticket numbers in branch names and show those tickets</label>
-        <label for="ticketPrefixes">Ticket prefixes</label>
-        <input type="text" id="ticketPrefixes" name="ticketPrefixes" value="${esc(cfg.ticketPrefixes.join(", "))}" placeholder="${esc(d.teamKeys.join(", ") || "ENG")}">
-        <div class="muted small" style="margin-top:4px">Prefixes of ticket numbers in branch and worktree names, e.g. <code>ENG</code> matches <code>fix-tab-eng-4821</code>. Empty = your ${t} ${teams}' keys${d.teamKeys.length ? ` (${esc(d.teamKeys.join(", "))})` : ""}.</div>
-      </section>
-
-      <section class="box"><h3>Polling</h3>
-        <div class="pair"><div><label for="pollMinutes">Check ${t} every (minutes)</label>
-          <input type="number" id="pollMinutes" name="pollMinutes" min="1" max="1440" value="${Math.round(cfg.pollIntervalSeconds / 60)}"></div>
-        <div><label for="workMinutes">Check commits and PRs every (minutes)</label>
-          <input type="number" id="workMinutes" name="workMinutes" min="1" max="1440" value="${Math.round(cfg.workCheckIntervalSeconds / 60)}"></div></div>
-      </section>
-
-      <section class="box"><h3>Launch</h3>
-        <label for="launcher">Launcher</label>
-        <select id="launcher" name="launcher">${launchers.map(([v, l]) => `<option value="${v}"${selected(cfg.launch.launcher === v)}>${esc(l)}</option>`).join("")}</select>
-        <p class="muted small">Applies to new and existing tickets. Existing worktrees are registered with the selected tool in place, keeping their paths, branches and files. Setup retries automatically until complete.</p>
-        <div class="pair"><div><label for="terminal">Terminal for Claude (Worktrunk, git, or editors set to Terminal)</label>
-          <select id="terminal" name="terminal">
-            <option value="terminal"${selected(cfg.launch.terminal === "terminal")}>Terminal (new tab)</option>
-            <option value="iterm"${selected(cfg.launch.terminal === "iterm")}>iTerm (new tab)</option>
-            <option value="warp"${selected(cfg.launch.terminal === "warp")}>Warp (new tab; the claude command is copied for you)</option>
-            <option value="none"${selected(cfg.launch.terminal === "none")}>None: just create the worktrees</option></select></div>
-        <div><label for="worktreesDir">Worktree folder (git, VS Code, Cursor)</label>
-          <input type="text" id="worktreesDir" name="worktreesDir" value="${esc(cfg.launch.worktreesDir)}"></div></div>
-        <div class="pair"><div><label for="ideSession">Claude in VS Code / Cursor</label>
-          <select id="ideSession" name="ideSession">
-            <option value="chat"${selected(cfg.launch.ideSession === "chat")}>Chat panel (prompt pre-filled; press Enter)</option>
-            <option value="terminal"${selected(cfg.launch.ideSession === "terminal")}>Terminal</option></select></div>
-        <div><label for="cursorChat">Cursor's chat panel uses</label>
-          <select id="cursorChat" name="cursorChat">
-            <option value="cursor"${selected(cfg.launch.cursorChat === "cursor")}>Cursor's own chat</option>
-            <option value="claude"${selected(cfg.launch.cursorChat === "claude")}>Claude Code extension</option></select></div></div>
-        <div class="pair"><div><label for="base">Base branch</label>
-          <input type="text" id="base" name="base" value="${esc(cfg.launch.base)}" placeholder="default branch"></div><div></div></div>
-        <label class="check"><input type="checkbox" name="fetch"${checked(cfg.launch.fetch)}> Fetch origin before creating worktrees</label>
-        <label class="check"><input type="checkbox" name="background"${checked(cfg.launch.background)}> Open worktrees and sessions in the background</label>
-        <label class="check"><input type="checkbox" name="moveToInProgressOnApprove"${checked(cfg.moveToInProgressOnApprove)}> Move the ${t} ticket to In Progress after launching</label>
-      </section>
-
-      <section class="box"><h3>Repos</h3>
-        <label for="repoRoots">Parent folders: every git repo directly inside is included (one per line)</label>
-        <textarea id="repoRoots" name="repoRoots" rows="2" placeholder="~/code">${esc(cfg.repoRoots.join("\n"))}</textarea>
-        <label for="repoPaths">Individual repos, wherever they live (one per line)</label>
-        <textarea id="repoPaths" name="repoPaths" rows="2" placeholder="~/work/web">${esc(cfg.repoPaths.join("\n"))}</textarea>
-        <div class="muted small" style="margin-top:4px">Add more with <strong>Choose in Finder</strong> under Maintenance. Descriptions below help triage pick the right repo; save after changing folders to refresh the list.</div>
-        <div class="repos">${repos.length ? repos.map((r) => `<div class="repo">
-            <input type="hidden" name="present:${esc(r.name)}" value="1">
-            <label class="check" style="margin:0"><input type="checkbox" name="include:${esc(r.name)}"${checked(!r.excluded)}> <strong>${esc(r.name)}</strong></label>
-            <input type="text" name="desc:${esc(r.name)}" value="${esc(r.override || r.derived)}" placeholder="What lives in this repo">
-          </div>`).join("") : `<p class="muted">No git repos found in this folder.</p>`}</div>
-      </section>
-
-      <section class="box"><h3>Triage</h3>
-        <div class="pair"><div><label for="provider">LLM backend</label>
-          <select id="provider" name="provider">
-            <option value="cli"${selected(cfg.llm.provider === "cli")}>Claude Code (claude -p, your login)</option>
-            <option value="api"${selected(cfg.llm.provider === "api")}>Anthropic API (ANTHROPIC_API_KEY)</option></select></div>
-        <div><label for="model">Model</label><input type="text" id="model" name="model" value="${esc(cfg.llm.model)}"></div></div>
-        <label for="lowConfidenceThreshold">Ask for a review when repo confidence is below</label>
-        <input type="number" id="lowConfidenceThreshold" name="lowConfidenceThreshold" min="0" max="1" step="0.05" value="${cfg.lowConfidenceThreshold}">
-      </section>
-
-      <section class="box"><h3>GitHub</h3>
-        <label for="githubUser">Account for PR tracking</label>
-        <select id="githubUser" name="githubUser">
-          <option value=""${selected(!cfg.githubUser)}>gh's active account</option>
-          ${[...new Set([...d.ghAccounts, ...(cfg.githubUser ? [cfg.githubUser] : [])])].map((a) => `<option value="${esc(a)}"${selected(cfg.githubUser === a)}>${esc(a)}</option>`).join("")}
-        </select>
-        <div class="muted small" style="margin-top:4px">Pin the account that can see your work repos, so switching gh accounts doesn't break tracking.</div>
-      </section>
-
-      <div class="savebar"><button class="primary" type="submit" data-busy-label="Saving…">Save settings</button><a class="btn" href="/">Cancel</a></div>
-    </form>
-
-    <section class="box" style="margin-top:20px"><h3>Maintenance</h3>
-      <div class="actrow">${action("/poll", "↻ Poll now", "Checking…")}<span class="muted small">Check ${t} and refresh PR status now.</span></div>
-      <div class="actrow">${action("/actions/reset", "Reset tickets", "Resetting…", "ghost-danger")}<span class="muted small">Clear tickets that haven't been launched and triage everything currently eligible again. Launched tickets are kept.</span></div>
-      <form method="post" action="/actions/erase" class="actrow erase">${tokenField}
-        <button class="ghost-danger" data-busy-label="Erasing…">Erase all data</button>
-        <span class="muted small">Every ticket (launched and imported too), brief and dismissed tip, for Linear and Jira. Sign-ins stay; worktrees and branches aren't touched. Afterwards your current tickets are fetched and triaged again.
-          <label class="check" style="margin:6px 0 0"><input type="checkbox" name="resetSettings"> Also reset settings to defaults</label>
-          <label class="check" style="margin:4px 0 0"><input type="checkbox" name="confirm" required> Yes, erase everything</label></span>
-      </form>
-      <div class="actrow">${action("/actions/pick-folders", "Choose in Finder…", "Waiting for Finder…")}<span class="muted small">Add parent folders or repos with the macOS folder picker (saved right away).</span></div>
-      <div class="actrow">${action("/actions/setup-again", "Run setup again", "Opening…")}<span class="muted small">Walk through the first-run steps again (repos, GitHub, tracker, statuses). Tickets are kept.</span></div>
-      <div class="actrow">${action("/actions/recheck", "Re-run setup checks", "Checking…")}<span class="muted small">Refresh the setup tips on the home screen.</span></div>
-      <div class="actrow">${action("/banners/restore", `Show dismissed tips${d.dismissedTips ? ` (${d.dismissedTips})` : ""}`, "Showing…")}<span class="muted small">Bring back setup tips you dismissed.</span></div>
-      <div class="actrow">${action("/actions/check-updates", "Check for updates", "Checking…")}<span class="muted small">Version ${esc(d.version)}.</span></div>
-      <div class="actrow">${action("/actions/restart", "Restart", "Restarting…")}<span class="muted small">${esc(d.service)}</span></div>
-      <dl class="facts" style="margin-top:14px"><dt>Config</dt><dd><code>${esc(d.paths.config)}</code></dd>
-        <dt>Data</dt><dd><code>${esc(d.paths.home)}</code></dd><dt>Log</dt><dd><code>${esc(d.paths.log)}</code></dd></dl>
-    </section>`;
+  return `<div class="top settings-heading"><div class="brand"><a class="logo" href="/" aria-label="Back to tickets">A</a><div><h1>Settings</h1><a class="small" href="/">← Back to tickets</a></div></div><span class="small muted">Autopilot ${esc(d.version)}</span></div>
+    ${d.error ? `<div class="alert" role="alert">${esc(d.error)}</div>` : ""}${d.notice ? `<div class="notice" role="status">${esc(d.notice)}</div>` : ""}
+    <div class="settings-shell" data-initial-section="${esc(String(draft?.get("section") || "connections"))}">
+      <nav class="settings-nav" aria-label="Settings sections">${nav.map(([id, name, hint]) => `<a href="#${id}" data-settings-link="${id}"><strong>${name}</strong><span>${hint}</span></a>`).join("")}</nav>
+      <div class="settings-panels" role="region" aria-label="Settings content" tabindex="0">
+        <section id="connections" class="settings-panel" data-settings-panel>
+          <h2>Connections</h2><p class="muted">Choose where tickets come from and which GitHub account tracks the work.</p>
+          <div class="settings-group"><h3>${esc(d.tracker)} account</h3>${metadata("account", "Checking your account…")}
+            ${d.signingIn ? `<p id="signin-wait" class="step"><span class="spinner"></span>Waiting for approval in your browser…</p>` : ""}
+            <div class="row">${action("/actions/signin", `Sign in to ${esc(d.tracker)}`, "Opening browser…")}${action("/actions/signout", "Sign out", "Signing out…", "ghost-danger")}</div>
+          </div>
+          <form method="post" action="/actions/switch-tracker" class="settings-group" data-tracker-form>${tokenField}
+            ${select("tracker", "Issue tracker", cfg.tracker, [["linear", "Linear"], ["jira", "Jira Cloud"]])}
+            <div data-when-tracker="jira">${text("jiraSite", "Jira site (optional)", cfg.jira.site, 'placeholder="acme.atlassian.net"')}</div>
+            <p class="small muted">Each tracker keeps its own tickets and account. Switching applies immediately.</p><button data-busy-label="Switching…">Switch tracker</button>
+          </form>
+          ${save("connections", "GitHub account", `${metadata("github", "Checking GitHub accounts…")}<div class="field"><label for="githubUser">Account for PR tracking</label><select name="githubUser" id="githubUser"><option value="">Use gh's active account</option>${cfg.githubUser ? `<option value="${esc(cfg.githubUser)}" selected>${esc(cfg.githubUser)}</option>` : ""}</select></div><p class="small muted">Pin an account to keep PR tracking consistent when you switch accounts in the terminal.</p>`)}
+        </section>
+        <section id="tickets" class="settings-panel" data-settings-panel>
+          ${save("tickets", "Ticket rules", `<p class="muted">Choose which assigned tickets Autopilot proposes and which existing work it follows.</p>
+            ${metadata("statuses", "Loading available statuses…")}
+            ${select("pickupMode", "Propose new work from", cfg.pickupStates.length ? "selected" : "any", [["selected", "Selected statuses"], ["any", "Any open status"]])}
+            <div data-selected-statuses>${statuses("pickupStates", cfg.pickupStates, "Statuses eligible for triage")}</div>
+            ${statuses("importStates", cfg.importStates, "Also follow existing work in these statuses")}
+            <p class="small muted">Existing work is shown without starting a new session. Select no statuses to turn this off.</p>
+            ${check("importWorktrees", "Discover tickets from existing worktree branches", cfg.importWorktrees, "tickets")}
+            ${check("moveToInProgressOnApprove", "Move a ticket to In Progress after launching", cfg.moveToInProgressOnApprove, "tickets")}
+            <div class="pair">${number("pollMinutes", "Check for tickets every (minutes)", Math.round(cfg.pollIntervalSeconds / 60), 'min="1" max="1440"')}${number("workMinutes", "Check commits and PRs every (minutes)", Math.round(cfg.workCheckIntervalSeconds / 60), 'min="1" max="1440"')}</div>
+            <details class="advanced-options"><summary>Advanced ticket matching</summary>${text("ticketPrefixes", "Ticket prefixes", cfg.ticketPrefixes.join(", "), 'placeholder="ENG, IT"')}<p class="small muted">Leave blank to use your tracker teams or projects.</p></details>`)}
+        </section>
+        <section id="repositories" class="settings-panel" data-settings-panel>
+          ${save("repositories", "Repositories", `<p class="muted">Add folders, choose included repositories, and describe what lives in each one.</p>
+            <button type="button" data-pick-folders data-busy-label="Waiting for Finder…">Choose folders in Finder…</button><p class="small muted">Chosen folders are added to this draft. Save when you're ready.</p>
+            ${area("repoRoots", "Parent folders (one per line)", cfg.repoRoots)}${area("repoPaths", "Individual repositories (one per line)", cfg.repoPaths)}
+            ${metadata("repos", "Loading repositories…")}<label for="repo-search">Find a repository</label><input type="search" id="repo-search" placeholder="Filter by name or path" autocomplete="off">
+            <div class="repos" data-repo-list></div><p class="small muted">Save folder changes to discover new repositories. Descriptions help route tickets.</p>`)}
+        </section>
+        <section id="launch" class="settings-panel" data-settings-panel>
+          ${save("launch", "Launch settings", `<p class="muted">Choose where approved tickets open.</p>
+            ${select("launcher", "Open work in", cfg.launch.launcher, [["supacode", "Supacode"], ["superset", "Superset"], ["worktrunk", "Worktrunk"], ["git", "Git worktrees"], ["vscode", "VS Code"], ["cursor", "Cursor"]])}
+            <p class="small muted" data-launcher-description>Existing worktrees keep their paths, branches and files when you change launchers.</p>
+            ${select("ideSession", "Start Claude in", cfg.launch.ideSession, [["chat", "Editor chat"], ["terminal", "Terminal"]], 'data-launchers="vscode cursor"')}
+            ${select("cursorChat", "Chat agent", cfg.launch.cursorChat, [["cursor", "Cursor"], ["claude", "Claude Code extension"]], 'data-launchers="cursor" data-chat-only')}
+            ${select("terminal", "Terminal", cfg.launch.terminal, [["terminal", "Terminal"], ["iterm", "iTerm"], ["warp", "Warp"], ["none", "None — create worktrees only"]], 'data-launchers="worktrunk git vscode cursor" data-terminal-only')}
+            <div data-launchers="git vscode cursor">${text("worktreesDir", "Worktree folder", cfg.launch.worktreesDir)}</div>
+            ${check("background", "Open work in the background", cfg.launch.background, "launch")}
+            <details class="advanced-options"><summary>Advanced launch options</summary>${text("base", "Base branch", cfg.launch.base, 'placeholder="Repository default"')}${check("fetch", "Fetch origin before creating worktrees", cfg.launch.fetch, "launch")}</details>`)}
+        </section>
+        <section id="ai" class="settings-panel" data-settings-panel>
+          ${save("ai", "AI settings", `<p class="muted">Configure ticket triage and when a repository choice needs your review.</p>
+            ${select("provider", "Triage provider", cfg.llm.provider, [["cli", "Claude Code — uses your login"], ["api", "Anthropic API"]])}
+            <p class="small muted">Changing provider takes effect after a restart.</p>${text("model", "Model", cfg.llm.model, "required")}
+            ${number("lowConfidenceThreshold", "Require repo review below this confidence", cfg.lowConfidenceThreshold, 'min="0" max="1" step="0.05"')}<p class="small muted">0.5 means 50%. Tickets below this threshold must be reviewed before launch.</p>`)}
+        </section>
+        <section id="advanced" class="settings-panel" data-settings-panel><h2>Advanced</h2><p class="muted">Diagnostics, updates, and local data.</p>
+          ${metadata("service", "Checking background service…")}
+          <div class="maintenance-grid">${action("/actions/check-updates", "Check for updates", "Checking…")}${action("/actions/recheck", "Refresh setup checks", "Checking…")}${action("/actions/restart", "Restart Autopilot", "Restarting…")}${action("/actions/setup-again", "Run setup again", "Opening…")}${action("/banners/restore", `Show dismissed tips (${d.dismissedTips})`, "Showing…")}</div>
+          <details class="advanced-options"><summary>Local files</summary><dl class="facts"><dt>Config</dt><dd><code>${esc(d.paths.config)}</code></dd><dt>Data</dt><dd><code>${esc(d.paths.home)}</code></dd><dt>Log</dt><dd><code>${esc(d.paths.log)}</code></dd></dl></details>
+          <details class="danger"><summary>Danger zone — reset or erase data</summary><p class="small muted">Reset clears unlaunched tickets and triages them again. Launched work is kept.</p>${action("/actions/reset", "Reset unlaunched tickets", "Resetting…", "ghost-danger")}
+            <form method="post" action="/actions/erase">${tokenField}<p class="small muted">Erase removes every ticket, brief and dismissed tip for both trackers. Sign-ins, worktrees and branches stay.</p><label class="check"><input type="checkbox" name="resetSettings"> Also reset settings</label><label class="check"><input type="checkbox" name="confirm" required> Yes, erase all local ticket data</label><button class="ghost-danger" data-busy-label="Erasing…">Erase all data</button></form>
+          </details>
+        </section>
+      </div>
+    </div>`;
 }

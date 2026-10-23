@@ -32,41 +32,54 @@ beta suffix, and `CFBundleVersion` defaults to a UTC `YYMM.DD.HH` build timestam
 `AUTOPILOT_BUILD_NUMBER` to its numeric build number (up to four digits, with up to two optional
 two-digit components, for example `42` or `2610.22.10`).
 
-## Runtime and migration
+## Runtime and formula coexistence
 
 Opening the app launches `autopilot desktop` with a pipe held open by the native host. The helper
 reports readiness only after its HTTP handlers are installed. It claims the configured loopback
-port before opening SQLite, so starting alongside an existing daemon cannot recover or overwrite
-the other process's in-flight ticket state. The app displays the conflict and instructions for
-stopping the old service; it never stops a service automatically.
+port before opening SQLite. If the port is occupied, `src/app/desktop.ts` checks `/desktop-info`
+for Autopilot's protocol version and a fingerprint of the canonical state directory and tracker.
+It connects only to a compatible daemon using the same data. Other listeners, different data
+stores and incompatible versions are refused without touching their state. The discovery
+endpoint uses the same loopback Host protection as the dashboard and exposes no CSRF token or path.
+
+When attached, the helper only monitors the connection; it never opens SQLite, polls trackers or
+starts sessions. Service downtime and changed boot identifiers trigger reconnection. It never
+starts a replacement worker after an attached service stops, including when the monitor itself
+crashes and is restarted by the native host. The menu bar reports who manages the worker.
 
 Closing the window keeps the worker alive. Dock reopen and the menu bar bring the window back.
 Quit closes stdin and terminates only the child owned by that app, with a bounded forced exit
-if needed. Losing the host pipe also stops the helper after a host crash. Unexpected worker exits
-restart up to three times, then show a retryable error with logs. Settings → Restart asks the host
-to restart the worker. Open at Login uses `SMAppService.mainApp` and changes only on user action.
+if needed. An independently owned daemon continues running. Losing the host pipe also stops the
+helper after a host crash. Unexpected helper exits restart up to three times, then show a retryable
+error with logs. Settings → Restart restarts the daemon through its owner (the app or launchd).
+Open at Login uses `SMAppService.mainApp` and changes only on user action.
 
 The native host accepts readiness and notification events over the child pipe. It exposes no
 JavaScript command bridge. Main-window navigation stays on the configured loopback origin;
 clicked external web, mail and supported editor/workspace links open through macOS. Notification
 clicks open the relevant local ticket; the Dock badge reads the daemon's pending count even when
-the window is closed. WebKit uses an ephemeral data store; settings and tracker tokens live in
+the window is closed. An attached formula service keeps delivering its existing terminal-notifier
+notifications; the app does not duplicate them. WebKit identifies itself with `AutopilotDesktop/1`
+so browser installation tips can be hidden; this presentation flag grants no permissions.
+WebKit uses an ephemeral data store; settings and tracker tokens live in
 the existing backend and Keychain, not browser storage.
 
-The cask links `autopilot` to the bundled helper. Its `open` command opens the app. `start` and
-`service` refuse to create a competing bundled daemon; use the app menu to manage startup.
-The existing headless CLI and formula remain supported.
+The cask installs only `Autopilot.app`; its helper is private to the bundle. The formula retains
+the `autopilot` CLI, so both packages can be installed at once without a symlink conflict.
+`autopilot open` opens the browser; `open -a Autopilot` opens the native window.
 
-Before switching from the formula:
+Keep the formula installed and running when adding the app. Coexistence is new after beta.9;
+older formula services lack discovery support and need one normal upgrade/restart:
 
 ```sh
-brew services stop autopilot
-brew uninstall --formula autopilot
+brew upgrade --formula autopilot
+brew services restart autopilot
+brew install --cask mrinalraj/tap/autopilot
 ```
 
-For the standalone LaunchAgent, use its existing binary's `autopilot service uninstall`.
-Older installations named `linear-autopilot` should stop that service too. Manual foreground
-daemons must be stopped in their own terminals. Keep the Application Support data folder.
+Users with the beta.9 cask should upgrade it before installing the formula, because that old
+cask linked its helper as `autopilot`. New app-only installs need no formula: with a free port,
+the app starts its own daemon. Keep the Application Support data folder.
 Config, SQLite and Keychain accounts are identical to the compiled headless install, including
 legacy-name migrations. Desktop logs live at `~/Library/Logs/Autopilot/autopilot.log`;
 with `AUTOPILOT_HOME` they live under that override's `logs/` directory.
@@ -111,14 +124,16 @@ open -a Autopilot
 ```
 
 For local Homebrew testing, `scripts/brew-install-local.sh` builds both architectures and installs
-a generated cask pointing at local `file://` ZIPs. It refuses to replace an installed formula
-without the explicit migration above. This script installs software; the build scripts do not.
+a generated cask pointing at local `file://` ZIPs. An installed formula can remain in place.
+This script installs software; the build scripts do not.
 
 To upgrade a cask install, quit the app, run `brew upgrade --cask autopilot`, then reopen it.
-The update banner provides those instructions. The standalone updater refuses to overwrite
+An app-owned daemon's update banner provides those instructions; when attached to the formula,
+the dashboard updates the formula with `brew upgrade --formula autopilot`, leaving the cask alone.
+The standalone updater refuses to overwrite
 anything inside the app bundle because doing so would break its signature. A manual installation
-upgrades by replacing the whole app. Normal cask uninstall preserves user data; `--zap` explicitly
-removes the data, logs and app preferences. Keychain credentials are not removed by the cask.
+upgrades by replacing the whole app. Cask uninstall, including `--zap`, preserves the shared
+Application Support data and Keychain credentials. Zap only removes native logs and preferences.
 
 ## Verification
 
@@ -132,12 +147,14 @@ onboarding, settings and ticket actions through the same server used by WKWebVie
 built app into a temporary folder and replaces its helper with a compiled fixture using the real
 HTTP/UI code and fake services. It verifies that WebKit loads the dashboard and runs its live
 script, that the host restarts a crashed worker, and that the worker exits when the host dies.
+It also restores the production helper and verifies attachment to an independent fake service,
+reconnection after that service restarts, and continued service operation after the app exits.
 It never reads tracker credentials or starts real sessions. Successful test artifacts are removed;
 failures retain their logs. This does not replace interactive release QA or testing on Intel hardware.
 
 Before promoting the beta to a stable release, test downloaded builds on Apple Silicon and Intel: first launch,
 OAuth, folder selection, terminal/editor launches, notifications, Dock reopen, Open at Login,
-worker crash/restart, Quit, formula migration, cask upgrade and uninstall. Use fake trackers and
+worker crash/restart, Quit, formula coexistence, cask upgrade and uninstall. Use fake trackers and
 an isolated home for automated checks; do not let smoke tests poll real tickets.
 
 References: [Homebrew Cask Cookbook](https://docs.brew.sh/Cask-Cookbook),

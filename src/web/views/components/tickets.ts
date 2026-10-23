@@ -1,5 +1,5 @@
 import { esc } from "../escape";
-import { badge, modalId, time, ago, stageBadge, prState, repoPills, workSummary } from "./ticket-shared";
+import { badge, modalId, time, ago, stageBadge, prState } from "./ticket-shared";
 import { issueExtras, explainerOf, ticketOf, workOf, worktreesOf, type IssueRow } from "../../../domain/issues";
 import { atRisk, overallStage, stage, type RepoWork } from "../../../domain/work";
 import { pathFromId } from "../../../domain/worktree";
@@ -13,12 +13,23 @@ export function ticketComponents(data: TicketViewData) {
   const actionable = (r: IssueRow) => r.status === "pending" || r.status === "failed";
 
   function confidence(r: IssueRow) {
-    return `<span class="conf${isLow(r) ? " low" : ""}" title="Repo confidence">${isLow(r) ? "low " : ""}${Math.round(r.confidence * 100)}%
+    return `<span class="conf${isLow(r) ? " low" : ""}" title="Repo confidence">${Math.round(r.confidence * 100)}%
       <span class="meter"><i style="width:${Math.round(r.confidence * 100)}%"></i></span></span>`;
   }
 
+  const compactRepos = (r: IssueRow) => `<span class="repo-name" title="${esc([r.repo, ...issueExtras(r).map((e) => e.repo)].join(", "))}">${esc(r.repo)}${issueExtras(r).length ? ` <span class="muted">+${issueExtras(r).length}</span>` : ""}</span>`;
+  const compactWork = (list: RepoWork[] | null) => {
+    if (!list?.length) return `<div class="workline">Checking the worktree…</div>`;
+    const commits = list.reduce((n, w) => n + (w.commitsAhead ?? 0), 0), dirty = list.reduce((n, w) => n + (w.dirtyFiles ?? 0), 0);
+    const missing = list.filter((w) => w.missing).length, errors = list.filter((w) => w.error).length;
+    const commitsKnown = list.every((w) => w.commitsAhead !== null), filesKnown = list.every((w) => w.dirtyFiles !== null && !w.missing && !w.error);
+    const commitLabel = commitsKnown || commits ? `<span><b>${commits}${commitsKnown ? "" : "+"}</b> commit${commits === 1 ? "" : "s"}</span>` : `<span>Commits unavailable</span>`;
+    return `<div class="workline">${commitLabel}${dirty ? `<span class="work-warning"><b>${dirty}${filesKnown ? "" : "+"}</b> uncommitted</span>` : filesKnown ? `<span>Clean</span>` : ""}${missing ? `<span class="work-warning">${missing} worktree${missing > 1 ? "s" : ""} missing</span>` : ""}${errors ? `<span class="work-warning">${errors} check error${errors > 1 ? "s" : ""}</span>` : ""}</div><div class="small muted">Checked ${esc(ago(list.reduce((oldest, w) => w.checkedAt < oldest ? w.checkedAt : oldest, list[0].checkedAt)))}</div>`;
+  };
+
   function card(r: IssueRow) {
     const ex = explainerOf(r);
+    const snapshot = ticketOf(r);
     const id = modalId(r.identifier);
     // Low-confidence items are approved from the modal, where the repo can be changed.
     const approve = isLow(r)
@@ -28,12 +39,12 @@ export function ticketComponents(data: TicketViewData) {
            ${issueExtras(r).map((e) => `<input type="hidden" name="extra" value="${esc(e.repo)}">`).join("")}
            <button class="primary" data-busy-label="Launching…">${r.status === "failed" ? "Retry launch" : "Approve"}</button></form>`;
     const actions = actionable(r)
-      ? `<div class="actions">${approve}<form method="post" action="${actionBase(r)}/reject">${tokenField}<button class="ghost-danger" data-busy-label="Rejecting…">Reject</button></form></div>`
+      ? `<div class="actions">${approve}<form method="post" action="${actionBase(r)}/reject">${tokenField}<button class="ghost-danger" data-busy-label="Rejecting…">Reject</button></form>${confidence(r)}</div>`
       : "";
-    return `<article class="card s-${r.status}">
-      <div class="cardhead">${badge(r.status, r.error)}<span class="ident">${esc(r.identifier)}</span>${confidence(r)}</div>
+    return `<article class="card s-${r.status}" data-card-id="${esc(r.identifier)}">
+      <div class="cardhead"><span class="ident">${esc(r.identifier)}</span>${badge(r.status, r.error)}${ex.size ? `<span class="size" aria-label="Size ${esc(ex.size)}">${esc(ex.size)}</span>` : ""}</div>
       <a class="title" href="#${id}">${esc(r.title)}</a>
-      <div class="pills">${repoPills(r)}${ex.size ? `<span class="pill">size ${esc(ex.size)}</span>` : ""}<span class="pill mono">${esc(r.branch)}</span></div>
+      <div class="card-context">${compactRepos(r)}${snapshot.project ? `<span>${esc(snapshot.project)}</span>` : ""}<span class="age" title="Ticket updated">${esc(ago(r.updated_at))}</span></div>
       <div class="summary">${esc(ex.summary)}</div>
       ${r.status === "failed" && r.error ? `<div class="alert">${esc(r.error)}</div>` : ""}
       ${r.status === "approved" || data.steps.has(r.identifier) ? stepLine(r) : noteLine(r)}
@@ -58,18 +69,18 @@ export function ticketComponents(data: TicketViewData) {
     const list = workOf(r);
     const st = list ? overallStage(list) : "working";
     const wt = worktreeLink(r);
-    const multi = (list?.length ?? 0) > 1;
+    const snapshot = ticketOf(r);
     const prs = (list ?? []).filter((w) => w.pr);
     const linearState = r.linear_state ? `<span class="pill linear" title="Linear status">${esc(r.linear_state)}</span>` : "";
-    const summary = r.worktree_id ? workSummary(list) : `<div class="workline">No worktree found for this ticket; showing its ${esc(data.trackerLabel)} status only.</div>`;
-    return `<article class="card w-${st}">
+    const summary = r.worktree_id ? compactWork(list) : `<div class="workline">No worktree found for this ticket; showing its ${esc(data.trackerLabel)} status only.</div>`;
+    return `<article class="card w-${st}" data-card-id="${esc(r.identifier)}">
       <div class="cardhead">${r.worktree_id ? stageBadge(st) : ""}<span class="ident">${esc(r.identifier)}</span>${linearState}</div>
       <a class="title" href="#${modalId(r.identifier)}">${esc(r.title)}</a>
-      <div class="pills">${r.repo ? repoPills(r) : ""}<span class="pill mono">${esc(r.branch)}</span></div>
+      <div class="card-context">${r.repo ? compactRepos(r) : ""}${snapshot.project ? `<span>${esc(snapshot.project)}</span>` : ""}</div>
       ${summary}
       ${data.steps.has(r.identifier) ? stepLine(r) : noteLine(r)}
-      <div class="actions">${prs.map((w) => `<a class="btn primary" href="${esc(w.pr!.url)}" target="_blank" rel="noreferrer">${multi ? `${esc(w.repo)} ` : ""}PR #${w.pr!.number} ↗</a>`).join("")}
-        ${wt ? `<a class="btn" href="${esc(wt)}">Open worktree</a>` : ""}${promptButton(r)}</div>
+      <div class="actions">${prs.slice(0, 1).map((w) => `<a class="btn primary" href="${esc(w.pr!.url)}" target="_blank" rel="noreferrer">PR #${w.pr!.number} ↗</a>`).join("")}${prs.length > 1 ? `<a class="btn" href="#${modalId(r.identifier)}">+${prs.length - 1} PRs</a>` : ""}
+        ${wt ? `<a class="btn" href="${esc(wt)}">Open worktree</a>` : ""}<a class="btn details-action" href="#${modalId(r.identifier)}" aria-label="Details and actions for ${esc(r.identifier)}">Details</a></div>
     </article>`;
   }
 
@@ -209,8 +220,8 @@ export function ticketComponents(data: TicketViewData) {
       : `<p class="muted" style="margin:0">No comments.</p>`;
 
     return `<div class="modal" id="${modalId(r.identifier)}" role="dialog" aria-modal="true" aria-label="${esc(r.identifier)}">
-      <a class="backdrop" href="#" aria-label="Close"></a>
-      <div class="panel">
+      <a class="backdrop" href="#" tabindex="-1" aria-hidden="true"></a>
+      <div class="panel" tabindex="-1">
         <div class="head"><div class="grow">
             <div class="cardhead">${badge(r.status, r.error)}<span class="ident">${esc(r.identifier)}</span>
               <span class="muted small">${esc(t.state)} · ${esc(t.team)}${t.project ? ` · ${esc(t.project)}` : ""}${t.labels.length ? ` · ${esc(t.labels.join(", "))}` : ""}</span></div>

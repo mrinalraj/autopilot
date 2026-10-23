@@ -68,13 +68,25 @@ test("running multi-repo tickets use supplied links and expose safety warnings",
   });
   const { workCard, modal } = ticketComponents(snapshot);
   expect(workCard(row)).toContain('href="vscode://file/work/api"');
-  expect(workCard(row)).toContain("api PR #12");
-  expect(workCard(row)).toContain("Send prompt to chat");
+  expect(workCard(row)).toContain('href="https://example.test/pr/12"');
+  expect(workCard(row)).toContain("PR #12");
+  expect(modal(row)).toContain("Send prompt to chat");
   expect(modal(row)).toContain("api: 2 uncommitted files");
   expect(modal(row)).toContain("web: 1 unpushed commit");
   expect(modal(row)).toContain('name="force"');
   expect(modal({ ...row, launcher: "superset" })).toContain("using the selected launcher");
   expect(modal({ ...row, launcher: "superset" })).not.toContain("through Supacode");
+});
+
+test("failed work checks never imply that a worktree is clean or has zero commits", () => {
+  const { workCard } = ticketComponents(data());
+  const html = workCard(issue({ status: "running", worktree_id: worktreeId("/work/api"), work_json: JSON.stringify([
+    work({ commitsAhead: null, dirtyFiles: null, error: "Could not inspect worktree" }),
+  ]) }));
+  expect(html).toContain("Commits unavailable");
+  expect(html).toContain("1 check error");
+  expect(html).not.toContain(">Clean<");
+  expect(html).not.toContain("<b>0</b> commits");
 });
 
 test("launch steps and imported tickets without worktrees render from data alone", () => {
