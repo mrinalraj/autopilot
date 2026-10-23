@@ -280,7 +280,7 @@ Other polling rules:
 
 ## Releasing
 
-All releases so far are pre-releases (`0.1.0-beta.N`); the latest is beta.9.
+All releases so far are pre-releases (`0.1.0-beta.N`); the latest is beta.10.
 
 `CHANGELOG.md` is the source of truth for release notes. Include user-visible changes under
 `Unreleased` in their implementation commit. Committing or pushing does not authorize a release,

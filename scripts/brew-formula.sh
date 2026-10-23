@@ -19,6 +19,7 @@ else
   OUT="packaging/autopilot.rb"
 fi
 
+mkdir -p "$(dirname "$OUT")"
 cat > "$OUT" <<RUBY
 class Autopilot < Formula
   desc "Triage Linear tickets and launch Claude Code sessions in worktrees"

@@ -13,6 +13,8 @@ Earlier history remains in Git commits, tags and GitHub releases; this file star
 
 ## [Unreleased]
 
+## [0.1.0-beta.10] - 2026-10-23
+
 ### Public beta installation and upgrades
 
 - Install the background service with `brew install --formula mrinalraj/tap/autopilot`, then
@@ -32,6 +34,9 @@ Earlier history remains in Git commits, tags and GitHub releases; this file star
   See [Apple's first-launch instructions](https://support.apple.com/en-us/102445).
 - Older releases and their assets remain available for existing installations and download links.
   Beta versions continue to receive update notifications for newer public betas.
+- Automated interface and daemon lifecycle checks run on Apple Silicon. Intel helpers are checked
+  under Rosetta; physical Intel hardware, downloaded-app first-launch approval, OAuth, notifications
+  and Open at Login still require interactive testing. This release remains a public beta.
 
 ### Added
 

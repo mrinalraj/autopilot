@@ -3,7 +3,7 @@
 Turn Linear or Jira tickets into Claude Code sessions, with you approving each one in your browser
 or the optional macOS app.
 
-[Changelog](CHANGELOG.md) · [Maintaining and reusing release notes](docs/changelog.md)
+[Public beta: 0.1.0-beta.10](https://github.com/mrinalraj/autopilot/releases/tag/v0.1.0-beta.10) · [Changelog](CHANGELOG.md) · [Maintaining and reusing release notes](docs/changelog.md)
 
 It watches your tracker (Linear, or Jira Cloud) for tickets assigned to you in **Ready for Development**. For each one it picks
 the repo among the ones you picked (parent folders and/or individual repos), plus any other repos the ticket also changes. It proposes a branch,
