@@ -9,9 +9,12 @@ export interface WebOptions {
   reschedule?: () => void;
   configPath?: string;
   gh?: () => GithubStatus;
+  ghAsync?: () => Promise<GithubStatus>;
 }
 
 export interface WebContext extends WebOptions {
+  /** Presentation only; this flag grants no permissions. */
+  desktopClient?: boolean;
   ap: Autopilot;
   configPath: string;
   gh: () => GithubStatus;

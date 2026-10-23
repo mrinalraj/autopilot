@@ -16,6 +16,7 @@ export function startWeb(ap: Autopilot, extras: WebOptions = {}, listening?: Ret
   const context: WebContext = {
     ...extras, ap, csrf, bootId: randomBytes(6).toString("hex"),
     configPath: extras.configPath ?? CONFIG_PATH, gh: extras.gh ?? githubStatus,
+    ghAsync: extras.ghAsync ?? (extras.gh ? async () => extras.gh!() : undefined),
   };
   const allowedHosts = new Set(["localhost:" + port, "127.0.0.1:" + port]);
   const validToken = (token: unknown) => {
@@ -37,7 +38,7 @@ export function startWeb(ap: Autopilot, extras: WebOptions = {}, listening?: Ret
         }
         return handleAction(url.pathname, form, context);
       }
-      return handlePage(url, context);
+      return handlePage(url, { ...context, desktopClient: /\bAutopilotDesktop\//.test(req.headers.get("user-agent") ?? "") });
     },
   };
   const server = listening ?? Bun.serve(options);

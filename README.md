@@ -1,6 +1,7 @@
 # autopilot
 
-A macOS app that turns Linear or Jira tickets into Claude Code sessions, with you approving each one.
+Turn Linear or Jira tickets into Claude Code sessions, with you approving each one in your browser
+or the optional macOS app.
 
 [Changelog](CHANGELOG.md) · [Maintaining and reusing release notes](docs/changelog.md)
 
@@ -19,7 +20,32 @@ Linear or Jira (MCP, OAuth) ──▶ newly eligible ticket ──▶ triage: re
    ──▶ In progress: commits, PR state (git + gh) ──▶ merged
 ```
 
-## Desktop app (Homebrew cask)
+## Install
+
+Autopilot has two supported distributions, built from the same code and released together.
+Use the formula for a background service with a browser UI, and add the optional native app
+whenever you want. The app also works on its own.
+Both include the runtime; Bun is only needed when building from source. Claude Code and your
+selected launcher must be installed separately.
+
+### Formula and browser
+
+Keep the original Homebrew workflow:
+
+```sh
+brew install --formula mrinalraj/tap/autopilot
+brew services start autopilot
+autopilot open
+```
+
+`autopilot open` opens the web interface in your browser (by default, http://localhost:4747).
+Complete setup there. The service runs independently of the browser and starts when you sign in;
+closing the browser does not stop it. Stop it with `brew services stop autopilot`.
+
+Update with `brew upgrade --formula autopilot`, then `brew services restart autopilot`.
+Existing formula users can keep this workflow without installing the native app.
+
+### Optional desktop app (Homebrew cask)
 
 The desktop beta supports Apple Silicon and Intel on macOS 13 Ventura or later. Install with:
 
@@ -34,20 +60,38 @@ and confirm. See [Apple's first-launch instructions](https://support.apple.com/e
 
 Autopilot has its own window, Dock icon, menu bar controls, notifications and approval-count
 badge. It bundles the daemon and runtime; Bun and a separate service are not needed. Closing
-the window keeps it watching tickets; **Quit Autopilot** stops its worker. Enable
+the window keeps it watching tickets. When connected to the formula service, **Quit Autopilot**
+leaves that service running. If the app started its own worker, Quit stops that worker. Enable
 **Autopilot → Open at Login** to start it when you sign in. Tracker OAuth opens in your browser.
 
-If you already use the formula, stop it and remove its binary before installing the cask:
+Keep the formula installed and running when adding the app. The app connects to the existing
+worker and uses the same settings, tickets and Keychain sign-in. The menu bar reports whether
+the app owns its worker or uses the background service. While attached, notifications continue
+through the service's terminal-notifier, and both the browser and app can show the same dashboard.
+
+This coexistence support is new after beta.9. Older formula services need an upgrade and one
+normal service restart before a new app can connect:
 
 ```sh
-brew services stop autopilot
-brew uninstall --formula autopilot
+brew upgrade --formula autopilot
+brew services restart autopilot
 ```
 
-For a standalone LaunchAgent, run `autopilot service uninstall` with the old binary instead.
-Keep `~/Library/Application Support/autopilot`: the app reuses its settings and tickets, and
-the existing Keychain sign-in. If another process owns the configured port, the app reports it
-without changing ticket state. See [desktop development and distribution](docs/desktop.md).
+The cask installs only the app; the formula provides the `autopilot` command. You can remove the
+app with `brew uninstall --cask autopilot` and keep using the formula in your browser. Even
+`--zap` preserves the shared Application Support data and Keychain sign-in. If the background
+service stops, an attached app waits for it to return instead of starting a second worker.
+An unrelated listener or a daemon using different data is refused without changing its state.
+See [desktop development and distribution](docs/desktop.md).
+
+The cask pulls in `gh`; Claude Code and the selected launcher must be installed separately.
+Native notifications do not need `terminal-notifier`. App logs are at
+`~/Library/Logs/Autopilot/autopilot.log`, also available through **View → Show Logs**.
+
+To install your own build through Homebrew, run `scripts/brew-install-local.sh` (builds, then
+installs the cask from a local tap). `--formula` selects the headless formula instead.
+
+### First-run setup (either distribution)
 
 The first launch walks through setup, and nothing is checked until it's done:
 
@@ -64,21 +108,10 @@ Settings → Maintenance → **Run setup again** goes through it again; `autopil
 the terminal. Upgrading from `linear-autopilot` keeps
 your data, settings and sign-in: they move to the new name on first start.
 
-The cask pulls in `gh`; Claude Code and the selected launcher must be installed separately.
-Native notifications do not need `terminal-notifier`. App logs are at
-`~/Library/Logs/Autopilot/autopilot.log`, also available through **View → Show Logs**.
-
-To install your own build through Homebrew, run `scripts/brew-install-local.sh` (builds, then
-installs the cask from a local tap). `--formula` selects the headless formula instead.
-
-## Quick start
+## Standalone binary and source
 
 Requirements: macOS, your selected launcher, the Claude Code CLI (logged in), and `gh` (logged in) for
 PR tracking.
-
-The headless formula remains available with `brew install --formula mrinalraj/tap/autopilot`
-and `brew services start autopilot`. Use either the desktop app or the headless service for the
-same data folder, and stop the service before switching to the app.
 
 With the standalone binary (from a release, or `bun run build`):
 
@@ -310,9 +343,9 @@ progress and links without manual triage, session creation or launcher setup con
 
 Development: `bun test`, `bun run typecheck`, `bun run build:app` (desktop), `bun run build` (CLI).
 
-The cask also links the bundled CLI. `autopilot open` opens the native app; `start` and `service`
-commands direct you to the app's lifecycle controls. `update --check` still checks releases;
-desktop upgrades replace the entire bundle.
+The formula provides the CLI; `autopilot open` keeps opening your browser even when the app is
+installed. Use `open -a Autopilot` for the native window. The cask's helper stays private inside
+its bundle. Desktop upgrades replace the entire bundle.
 
 Logs: `logs/autopilot.log` under the home folder (not rotated). Health check:
 `curl localhost:4747/healthz`.
@@ -327,7 +360,8 @@ version exists, the page shows an **Update available** banner with the release n
   before swapping it in place. The service then restarts into it.
 - **Desktop cask:** quit Autopilot, run `brew upgrade --cask autopilot`, then reopen it. Manual
   app installs replace `Autopilot.app` from the release. The bundled CLI is never updated alone.
-- **Homebrew formula:** the button runs `brew upgrade autopilot`.
+- **Homebrew formula:** the button runs `brew upgrade --formula autopilot`. When the app connects
+  to the formula service, its dashboard also updates the formula; upgrade the cask separately.
 - **Running from source:** the banner just says to `git pull`.
 
 Nothing installs automatically. `autopilot update --check` does the same check from the
@@ -476,7 +510,8 @@ Ticket text is untrusted, and it ends up in front of an agent with shell access.
 - **Page not loading after an install or restart:** check the log (`autopilot paths`). A second
   copy started by hand will fail to bind the port; `autopilot service status` shows whether
   the service is running.
-- **No notifications:** allow terminal-notifier (see Quick start).
+- **No notifications:** allow Autopilot in macOS notification settings for the desktop app, or
+  terminal-notifier for the formula.
 - **A ticket you expected isn't showing:** it must be assigned to you *and* in a `pickupStates`
   status, and it must have *become* eligible after the first poll. `bun run reset` re-queues
   everything eligible right now.

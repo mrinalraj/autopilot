@@ -1,5 +1,6 @@
 import styles from "../assets/styles.css" with { type: "text" };
 import liveScript from "../assets/live.js" with { type: "text" };
+import settingsScript from "../assets/settings.js" with { type: "text" };
 import { esc } from "./escape";
 
 /** Pure page rendering; the HTTP layer supplies the CSP nonce. */
@@ -13,5 +14,5 @@ export function renderPage(title: string, body: string, nonce: string): string {
 <meta name="theme-color" content="#f4f4f1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f0f0e" media="(prefers-color-scheme: dark)">
 <style>${styles}</style></head>
-<body><main>${body}</main><script nonce="${nonce}">${liveScript}</script></body></html>`;
+<body><noscript><style>.settings-panel{display:block!important}</style></noscript><div class="navigation-progress" aria-hidden="true"></div><div class="sr-only" id="navigation-status" role="status"></div><main id="main-content">${body}</main><script nonce="${nonce}">${liveScript}\n${settingsScript}</script></body></html>`;
 }

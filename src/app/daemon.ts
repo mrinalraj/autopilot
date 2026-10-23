@@ -26,7 +26,7 @@ export async function runDaemon(opts: DaemonOptions = {}) {
       cfg.port = server.port!;
     } catch (err) {
       if ((err as { code?: string }).code === "EADDRINUSE") {
-        throw new Error(`Port ${cfg.port} is already in use. Stop the existing Autopilot service (brew services stop autopilot, or autopilot service uninstall for a standalone install), then reopen the app.`);
+        throw new Error(`Port ${cfg.port} is already in use. Use the existing Autopilot service, or stop it before starting another worker (brew services stop autopilot, or autopilot service uninstall for a standalone install).`, { cause: err });
       }
       throw err;
     }

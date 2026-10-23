@@ -207,7 +207,9 @@ test("saving a launcher change starts migration and refuses another change while
     expect(legacy.ap.launcherBusy).toBe(true);
     form.set("launcher", "git");
     const blocked = await handleAction("/settings", form, legacy.ctx);
-    expect(decodeURIComponent(blocked.headers.get("location")!)).toContain("still running");
+    const blockedPage = await blocked.text();
+    expect(blockedPage).toContain("still running");
+    expect(blockedPage).toContain('<option value="git" selected>'); // retain the requested launcher as a draft
     expect(String(f.cfg.launch.launcher)).toBe("superset");
   } finally {
     release();

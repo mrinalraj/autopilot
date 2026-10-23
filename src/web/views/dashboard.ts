@@ -25,15 +25,16 @@ export function dashboardBody(data: DashboardData) {
   };
 
   return (
-    `<div class="top"><div class="brand"><div class="logo">A</div><div><h1>Autopilot</h1>
+    `<div class="dashboard-shell"><div class="dashboard-main"><div class="dashboard-header"><div class="top"><div class="brand"><div class="logo">A</div><div><h1>Autopilot</h1>
         <div class="muted small">${esc(pollInfo)} · picks up your tickets in <strong>${esc(picks)}</strong></div></div></div>
       <div class="row"><form method="post" action="/poll">${tokenField}<button${data.polling ? " disabled" : ""} data-busy-label="Checking…">↻ Poll now</button></form>
         <button type="button" class="btn" id="logtoggle" aria-controls="logs" aria-expanded="false">Logs</button>
-        <a class="btn gear" href="/settings" title="Settings" aria-label="Settings">⚙</a></div></div>
+        <a class="btn" href="/settings" title="Settings">Settings</a></div></div>
      <div class="stats"><div class="stat"><b>${queue.length}</b><span>Awaiting</span></div>
        <div class="stat"><b>${inProgress.length}</b><span>In progress</span></div>
        <div class="stat"><b>${inReview.length}</b><span>In review</span></div>
        <div class="stat"><b>${prsOpen}</b><span>PRs open</span></div></div>
+     </div><div class="dashboard-scroll" role="region" aria-label="Tickets" tabindex="0">
      ${setupBanners(data.health, data.dismissed, tokenField)}
      ${updateBanner(data.updater, tokenField)}
      <div id="live" data-version="${esc(data.version)}" data-boot="${data.bootId}" data-awaiting="${queue.length}">${banner.html}</div>
@@ -60,7 +61,7 @@ export function dashboardBody(data: DashboardData) {
      ${inReview.length ? `<div class="section"><h2>In review</h2><span class="count">${inReview.length}</span></div><div class="grid">${inReview.map(workCard).join("")}</div>` : ""}
      ${completed.length ? `<details class="fold"><summary>Completed <span class="count">${completed.length}</span></summary><div class="recent">${completed.map(recentItem).join("")}</div></details>` : ""}
      ${rejected.length ? `<details class="fold"><summary>Rejected &amp; dismissed <span class="count">${rejected.length}</span></summary><div class="recent">${rejected.map(recentItem).join("")}</div></details>` : ""}
-     ${[...queue, ...launching, ...inProgress, ...inReview, ...completed, ...rejected].map(modal).join("")}
-     ${logPanel(data.logs)}`
+     </div></div>${logPanel(data.logs)}</div>
+     ${[...queue, ...launching, ...inProgress, ...inReview, ...completed, ...rejected].map(modal).join("")}`
   );
 }

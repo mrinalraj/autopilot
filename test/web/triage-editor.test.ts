@@ -13,17 +13,21 @@ function editor(reply: () => Promise<Reply>, action = "edit-triage") {
   const classes = new Set<string>(), attributes = new Map<string, string>();
   const label = action === "edit-triage" ? "Update" : "Approve & launch";
   const button = { dataset: {} as Record<string, string>, innerHTML: label, textContent: label,
+    style: { width: "", height: "" }, getBoundingClientRect: () => ({ width: 120, height: 34 }), replaceChildren: () => {},
     classList: { add: (name: string) => classes.add(name), remove: (name: string) => classes.delete(name) },
     hasAttribute: (name: string) => name === "data-skip-triage" && action === "reject",
     getAttribute: (name: string) => name === "formaction" && action !== "edit-triage" ? `/issues/ENG-1/${action}` : null,
     setAttribute: (name: string, value: string) => attributes.set(name, value), removeAttribute: (name: string) => attributes.delete(name) };
   const form = { dataset: {} as Record<string, string>, action: "http://localhost/issues/ENG-1/edit-triage",
+    matches: () => false,
     elements: { namedItem: (name: string) => ({ set value(value: string) { fields.set(name, value); } }) },
     hasAttribute: (name: string) => name === "data-triage-edit", querySelector: () => error };
   let submit!: (event: unknown) => void;
   let request: FormData | null = null, requests = 0, reloads = 0, location = "", url = "";
   runInNewContext(script, {
-    document: { addEventListener: (name: string, callback: typeof submit) => { if (name === "submit") submit = callback; }, getElementById: () => null },
+    document: { addEventListener: (name: string, callback: typeof submit) => { if (name === "submit") submit = callback; }, getElementById: () => null,
+      querySelectorAll: () => [], createElement: () => ({ className: "", textContent: "" }) },
+    window: {}, matchMedia: () => ({ matches: false }),
     addEventListener: () => {},
     FormData: class extends FormData { constructor() { super(); for (const [key, value] of fields) this.set(key, value); } },
     fetch: async (target: string, init: { body: FormData }) => { url = target; request = init.body; requests++; return reply(); },

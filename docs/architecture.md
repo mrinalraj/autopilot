@@ -3,7 +3,11 @@
 The macOS desktop host is in `desktop/macos/`; see [desktop.md](desktop.md) for lifecycle and
 distribution. It launches the bundled CLI's `desktop` command, displays the existing loopback UI
 in WKWebView and receives readiness/notification events over a child pipe. The web layer exposes
-no privileged native bridge. CLI/formula installs continue to use the same application services.
+no privileged native bridge. `src/app/desktop.ts` can instead monitor an already-running daemon,
+after `/desktop-info` confirms protocol compatibility and the same data store. It never opens
+SQLite in that mode, and quitting the app leaves the independent service running. The cask
+does not link a CLI, so it can coexist with the formula. CLI/formula installs continue to use
+the same application services.
 
 Autopilot is a Bun/TypeScript daemon with server-rendered HTML. There is no frontend framework,
 separate API deployment, or dependency-injection container. The folders separate responsibilities
@@ -33,7 +37,8 @@ src/
     presenters/           # application state -> page snapshots
     models.ts             # data-only view contracts
     views/                # HTML templates, layout and components
-    assets/               # styles.css, live.js, service-worker.js
+    assets/               # styles.css, live.js, settings.js, service-worker.js
+    settings-data.ts      # immediate settings snapshot and cached optional metadata checks
     setup.ts              # pure setup-step definitions and completion rules
     state.ts              # live polling snapshots/version
     http.ts               # CSP, nonce, redirects and Response construction
@@ -56,8 +61,9 @@ server -> routes/pages -> presenters/dashboard -> views/dashboard -> HTTP respon
 
 The presenter reads tickets, groups their phases, collects progress and notices, resolves worktree
 links, and loads the catalog once when tickets exist. The template receives that snapshot, not an
-application object. Settings and setup routes likewise gather accounts, repos, paths and statuses
-before passing them to their templates.
+application object. Settings renders local configuration immediately; `/settings/data` loads account,
+status, repository and service checks independently with timeouts and a short cache. Each section saves
+only its own fields and retains drafts on validation errors. Setup gathers its metadata before rendering.
 
 Views can format strings, choose markup, and use pure domain helpers. They cannot query SQLite,
 read files, spawn commands, fetch APIs, or invoke application actions. Type-only imports describe
@@ -89,6 +95,7 @@ validates the HTTP callback, and `web/views/auth.ts` renders its response. Ticke
 | Approval, polling or launch workflow | `app/autopilot.ts` |
 | New HTTP action | `web/routes/actions.ts`, delegating work to the relevant service |
 | Settings field | `config/config.ts`, `config/settings.ts`, `web/views/settings.ts` |
+| Settings navigation, drafts or optional checks | `web/assets/settings.js`, `web/settings-data.ts` |
 | Tracker behavior | `trackers/` |
 | Editor/terminal/worktree integration | `workspaces/launch.ts` |
 | Brief Markdown layout | `triage/brief-template.ts` |

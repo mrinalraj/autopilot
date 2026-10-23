@@ -190,9 +190,17 @@ export class Health {
     }
 
     if (!isDesktop()) items.push({
+      id: "native-app",
+      level: "optional",
+      title: app("Autopilot") ? "Open the native macOS app" : "Optional native macOS app",
+      detail: "Use Autopilot in its own window with a menu bar icon and Dock badge. Keep your formula and background service running; the app connects to it, and quitting the app leaves it running. This beta is not notarized: after trying to open it, approve it in System Settings → Privacy & Security → Open Anyway.",
+      command: app("Autopilot") ? "open -a Autopilot" : "brew install --cask mrinalraj/tap/autopilot",
+      link: { href: "https://support.apple.com/en-us/102445", label: "macOS first-launch instructions" },
+      browserOnly: true,
+    }, {
       id: "install-app",
       level: "optional",
-      title: "Install as an app",
+      title: "Add a browser shortcut",
       detail: "Get its own window and a Dock badge with the number of tickets waiting. Chrome: the install icon in the address bar. Safari: File → Add to Dock. Use localhost, not 127.0.0.1.",
       browserOnly: true,
     });

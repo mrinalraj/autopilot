@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../../src/config/config";
@@ -8,6 +8,7 @@ import { Autopilot } from "../../src/app/autopilot";
 import { startWeb } from "../../src/web/server";
 import type { Tracker } from "../../src/trackers/tracker";
 import type { LLM } from "../../src/triage/llm";
+import { desktopDataId } from "../../src/platform/desktop";
 
 const dir = mkdtempSync(join(tmpdir(), "autopilot-web-"));
 const port = 47000 + Math.floor(Math.random() * 900);
@@ -15,6 +16,7 @@ const base = `http://localhost:${port}`;
 let server: ReturnType<typeof startWeb>;
 let store: Store;
 let cfgStateDir: string;
+let githubChecks = 0;
 const health = {
   items: [
     { id: "supacode", level: "required", title: "Supacode isn't installed", detail: "needed" },
@@ -30,6 +32,7 @@ beforeAll(() => {
   Bun.spawnSync(["git", "init", "-q", join(dir, "repos", "backend")]);
   const cfg = { ...loadConfig("/nonexistent"), onboarded: true, port, repoRoots: [join(dir, "repos")], stateDir: join(dir, "state"), briefsDir: join(dir, "b") };
   store = new Store(cfg.stateDir);
+  writeFileSync(join(dir, "settings.json"), JSON.stringify(cfg));
   store.upsertIssue({
     linear_id: "x", identifier: "ENG-9", title: `<script>alert(1)</script>`, url: "https://linear.app/i/ENG-9",
     brief_path: join(dir, "b", "ENG-9.md"), repo: "backend", repo_path: join(dir, "repos", "backend"), branch: "fix-it-eng-9",
@@ -43,7 +46,7 @@ beforeAll(() => {
   const listening = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("starting", { status: 503 }) });
   server = startWeb(ap, {
     health: health as never, configPath: join(dir, "settings.json"),
-    gh: () => ({ installed: true, accounts: [{ name: "test-account", active: true }] }),
+    gh: () => { githubChecks++; return { installed: true, accounts: [{ name: "test-account", active: true }] }; },
   }, listening);
   expect(server).toBe(listening);
 });
@@ -110,6 +113,35 @@ test("state endpoint reports progress and a change version", async () => {
   expect(typeof s.awaiting).toBe("number");
 });
 
+test("desktop discovery identifies the data store and boot without disclosing paths or CSRF tokens", async () => {
+  const response = await fetch(`${base}/desktop-info`);
+  const info = await response.json();
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(info).toMatchObject({ app: "autopilot", protocol: 1, data: desktopDataId({ stateDir: cfgStateDir, tracker: "linear" }) });
+  expect(info.boot).toBe((await (await fetch(`${base}/state`)).json()).boot);
+  expect(JSON.stringify(info)).not.toContain(cfgStateDir);
+  expect(info).not.toHaveProperty("csrf");
+  expect((await fetch(`${base}/desktop-info`, { headers: { Host: "evil.example" } })).status).toBe(403);
+});
+
+test("native clients hide browser installation tips while keeping required health checks", async () => {
+  const html = await (await fetch(`${base}/`, { headers: { "User-Agent": "AppleWebKit AutopilotDesktop/1" } })).text();
+  expect(html).not.toContain("Install as an app");
+  expect(html).toContain("Supacode isn&#39;t installed");
+  expect(await (await fetch(`${base}/`)).text()).toContain("Install as an app");
+});
+
+test("health changes update the browser state version and match the rendered page", async () => {
+  const before = await (await fetch(`${base}/state`)).json();
+  const original = health.items[0].detail;
+  try {
+    health.items[0].detail = "Changed health status";
+    const after = await (await fetch(`${base}/state`)).json();
+    expect(after.version).not.toBe(before.version);
+    expect(await (await fetch(`${base}/`)).text()).toContain(`data-version="${after.version}"`);
+  } finally { health.items[0].detail = original; }
+});
+
 test("setup banners: optional ones dismiss and stay dismissed, required ones can't", async () => {
   let html = await (await fetch(`${base}/`)).text();
   expect(html).toContain("Supacode isn&#39;t installed");
@@ -144,15 +176,35 @@ test("log panel is prefilled, escaped, and /events streams only newer lines", as
   expect(fresh.map((e: { msg: string; level: string }) => [e.level, e.msg])).toEqual([["warn", "marker-two"]]);
 });
 
-test("settings shows the Linear account section (signed out here)", async () => {
+test("settings renders local controls before optional account and status checks", async () => {
+  const before = githubChecks;
   const html = await (await fetch(`${base}/settings`)).text();
   expect(html).toContain("Linear account");
   expect(html).toContain('action="/actions/signin"');
   expect(html).toContain('<option value="linear" selected>Linear</option>');
   expect(html).toContain("Sign in to Linear");
-  expect(html).toContain('value="test-account"');
+  expect(githubChecks).toBe(before);
+  expect(html).toContain('data-check="github"');
   expect(html).toContain(join(dir, "settings.json"));
   expect(html).toContain('value="superset"');
+  const result = await (await fetch(`${base}/settings/data?part=github`)).json();
+  expect(result).toMatchObject({ ok: true, data: { accounts: [{ name: "test-account" }] } });
+  await fetch(`${base}/settings/data?part=github`);
+  expect(githubChecks).toBe(before + 1);
+});
+
+test("settings JSON validation preserves config and identifies the field; HTML fallback retains the draft", async () => {
+  const html = await (await fetch(`${base}/settings`)).text();
+  const csrf = csrfFrom(html), path = join(dir, "settings.json"), before = readFileSync(path, "utf8");
+  const body = new URLSearchParams({ csrf, section: "ai", provider: "cli", model: "my-unsaved-model", lowConfidenceThreshold: "2", response: "json" });
+  const res = await fetch(`${base}/settings`, { method: "POST", body });
+  expect(res.status).toBe(400);
+  expect(await res.json()).toMatchObject({ ok: false, fields: { lowConfidenceThreshold: expect.any(String) } });
+  expect(readFileSync(path, "utf8")).toBe(before);
+  body.delete("response");
+  const fallback = await (await fetch(`${base}/settings`, { method: "POST", body })).text();
+  expect(fallback).toContain('value="my-unsaved-model"');
+  expect(fallback).toContain('data-initial-section="ai"');
 });
 
 test("rejects foreign Host headers (DNS rebinding)", async () => {

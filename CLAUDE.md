@@ -26,8 +26,11 @@ AUTOPILOT_HOME=$PWD/.dev/fresh bun src/cli.ts start   # a throwaway home: walks 
 `paths`, `version`).
 
 - **Desktop app:** `desktop/macos/main.swift` embeds the UI in WKWebView and owns the bundled
-  daemon through its `desktop` command and stdin lifetime. Closing the window keeps it running;
-  Quit stops only that child. Open at Login uses SMAppService. See `docs/desktop.md` for app build,
+  helper through its `desktop` command and stdin lifetime. With no listener, the helper starts a
+  daemon; with a compatible listener using the same data, it only monitors the connection.
+  Quit stops only that child and leaves an independently owned service running. A disconnected
+  app never takes over its service; it waits and reconnects. The cask does not link a CLI or zap
+  shared data, so formula and app can coexist. Open at Login uses SMAppService. See `docs/desktop.md` for app build,
   signing, cask and migration instructions. The desktop beta is ad-hoc signed and not notarized.
   Data and Keychain accounts match compiled CLI installs; logs are in `~/Library/Logs/Autopilot/`.
 - **Headless formula:** Homebrew (`brew install --formula mrinalraj/tap/autopilot`) under `brew services`
@@ -266,7 +269,7 @@ Other polling rules:
     `checkForUpdate` picks from the release list with `pickRelease`. Betas follow betas and
     releases; release installs follow releases only.
   - Standalone installs verify the SHA-256 and the new binary's version before swapping. Homebrew
-    installs run `brew upgrade autopilot` with `HOMEBREW_AUTO_UPDATE_SECS=0`, so the tap is fresh.
+    installs run `brew upgrade --formula autopilot` with `HOMEBREW_AUTO_UPDATE_SECS=0`, so the tap is fresh.
   - Never install without an explicit user action.
   - Desktop bundles are a separate install kind: upgrade the whole app through `brew upgrade
     --cask autopilot` (while quit), or replace a manually installed bundle. Never swap its helper

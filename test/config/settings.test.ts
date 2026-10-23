@@ -129,3 +129,35 @@ test("folders picked in Finder: repos join the individual list, other folders th
   expect([cfg.repoRoots, cfg.repoPaths]).toEqual([[reposRoot], [join(reposRoot, "web")]]);
   expect(addPicked(cfg, [join(dir, "empty-nothing-here")], path)[0]).toContain("doesn't exist");
 });
+
+test("section saves preserve unrelated values and unknown config keys", () => {
+  const path = join(dir, "sections.json");
+  writeFileSync(path, JSON.stringify({ repoRoots: [reposRoot], pickupStates: ["Ready"], pollIntervalSeconds: 300, launch: { launcher: "superset", supersetBin: "/custom/superset" }, custom: 42 }));
+  const cfg = loadConfig(path);
+  const res = saveSettings(cfg, form({ section: "ai", provider: "cli", model: "new-model", lowConfidenceThreshold: "0.8", launcher: "git", pickupStates: "Other" }), path);
+  expect(res.errors).toEqual([]);
+  expect(cfg.llm.model).toBe("new-model");
+  expect(cfg.launch.launcher).toBe("superset");
+  expect(cfg.pickupStates).toEqual(["Ready"]);
+  expect(cfg.repoRoots).toEqual([reposRoot]);
+  expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({ custom: 42, launch: { supersetBin: "/custom/superset" } });
+});
+
+test("repository saves preserve overrides while optional catalogue controls are loading", () => {
+  const path = join(dir, "repo-draft.json");
+  writeFileSync(path, JSON.stringify({ repoRoots: [reposRoot], repos: { api: { exclude: true, description: "Keep this" } } }));
+  const cfg = loadConfig(path);
+  expect(saveSettings(cfg, form({ section: "repositories", repoRoots: reposRoot, repoPaths: "" }), path).errors).toEqual([]);
+  expect(cfg.repos.api).toEqual({ exclude: true, description: "Keep this" });
+});
+
+test("empty selected statuses cannot accidentally enable watching every open ticket", () => {
+  const path = join(dir, "status-mode.json");
+  writeFileSync(path, JSON.stringify({ pickupStates: ["Ready"] }));
+  const cfg = loadConfig(path);
+  const fields = { section: "tickets", pickupMode: "selected", pollMinutes: "5", workMinutes: "2" };
+  expect(saveSettings(cfg, form(fields), path).fields?.pickupMode).toContain("Choose at least one");
+  expect(cfg.pickupStates).toEqual(["Ready"]);
+  expect(saveSettings(cfg, form({ ...fields, pickupMode: "any", pickupStates: "Ready" }), path).errors).toEqual([]);
+  expect(cfg.pickupStates).toEqual([]);
+});

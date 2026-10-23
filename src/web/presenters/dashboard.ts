@@ -38,12 +38,12 @@ export async function dashboardData(ctx: WebContext, error?: string, notice?: st
     catalog: rows.length ? ap.catalog() : [],
     queue, launching, inProgress, inReview, completed, prsOpen, rejected, worktreeLinks,
     steps: new Map(launchSteps), notes: new Map(ap.notes), canResendPrompt: !!launcher.resendPrompt,
-    health: health ? { items: [...health.items] } : undefined,
+    health: health ? { items: health.items.filter((item) => !ctx.desktopClient || !item.browserOnly) } : undefined,
     dismissed: ap.store.dismissedBanners(),
     updater: updater ? { info: updater.info, status: updater.status, error: updater.error } : undefined,
     logs: eventsSince(0, 150), progress: { ...ap.progress }, activity: ap.activity(),
     lastPollAt: ap.lastPollAt, lastPollError: ap.lastPollError,
     polling: ap.polling, signingIn: ap.signingIn, empty: ap.isEmpty(),
-    version: stateVersion(ap, updater), bootId: ctx.bootId, tokenField: csrfField(ctx.csrf), error, notice,
+    version: stateVersion(ap, updater, health), bootId: ctx.bootId, tokenField: csrfField(ctx.csrf), error, notice,
   };
 }
