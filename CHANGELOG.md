@@ -13,6 +13,11 @@ Earlier history remains in Git commits, tags and GitHub releases; this file star
 
 ## [Unreleased]
 
+### Added
+
+- A static launch website with an interactive app preview gallery, the 20-second product film,
+  Homebrew installation instructions, and a GitHub Pages deployment workflow.
+
 ## [0.1.0-beta.10] - 2026-10-23
 
 ### Public beta installation and upgrades

@@ -5,6 +5,8 @@ or the optional macOS app.
 
 [Public beta: 0.1.0-beta.10](https://github.com/mrinalraj/autopilot/releases/tag/v0.1.0-beta.10) · [Changelog](CHANGELOG.md) · [Maintaining and reusing release notes](docs/changelog.md)
 
+[Visit the launch website](https://mrinalraj.github.io/autopilot/). Source lives in [`site/`](site/); see [website preview and GitHub Pages deployment](docs/website.md).
+
 It watches your tracker (Linear, or Jira Cloud) for tickets assigned to you in **Ready for Development**. For each one it picks
 the repo among the ones you picked (parent folders and/or individual repos), plus any other repos the ticket also changes. It proposes a branch,
 writes a short explainer, then asks you to approve or reject it in Autopilot. When you
