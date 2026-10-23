@@ -1,7 +1,8 @@
 # Release plan: 0.1.0-beta.10
 
-Prepared 2026-10-23. This is a plan; the version bump, merge, tag, publication and Homebrew
-installation steps have not been performed.
+Prepared and executed 2026-10-23. **Completed:** beta.10 is published and both Homebrew packages
+are live. See the [release handoff and verification](releases/0.1.0-beta.10.md) for final results
+and remaining manual QA. The plan and initial evidence below are retained as a historical snapshot.
 
 ## Release target
 
@@ -15,7 +16,7 @@ installation steps have not been performed.
 
 Canonical release notes remain in `CHANGELOG.md`; this plan does not replace them.
 
-## Current evidence
+## Evidence at planning time (superseded by the release handoff)
 
 | Item | Status |
 | --- | --- |
