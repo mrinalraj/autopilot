@@ -15,6 +15,8 @@ Earlier history remains in Git commits, tags and GitHub releases; this file star
 
 ### Added
 
+- The Go/React cloud application is now tracked alongside the existing macOS application,
+  establishing a reproducible source baseline for local packaging and PWA work.
 - A static launch website with an interactive app preview gallery, the 20-second product film,
   Homebrew installation instructions, and a GitHub Pages deployment workflow.
 

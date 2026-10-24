@@ -1,0 +1,17 @@
+name: autopilot-cloud
+
+services:
+  autopilot:
+    build: .
+    image: autopilot-cloud:0.1.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4780:4780"
+    environment:
+      AUTOPILOT_ALLOWED_HOSTS: "127.0.0.1:4780,localhost:4780"
+    volumes:
+      - autopilot-data:/data
+    stop_grace_period: 15s
+
+volumes:
+  autopilot-data:
