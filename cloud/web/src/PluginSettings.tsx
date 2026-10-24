@@ -19,7 +19,6 @@ import {
   Plugin,
   Profile,
   Workspace,
-  Worktree,
 } from "./types";
 export const pluginNames: Record<string, string> = {
   native: "Autopilot",

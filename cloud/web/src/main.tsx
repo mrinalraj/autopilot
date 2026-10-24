@@ -1,3 +1,5 @@
+import "./pwa";
+import { AppBoundary } from "./AppBoundary";
 import React, {
   lazy,
   Suspense,
@@ -10,23 +12,17 @@ import React, {
 import { createRoot } from "react-dom/client";
 import {
   ArrowUpRight,
-  Boxes,
   Check,
   ChevronDown,
-  Circle,
-  CircleDot,
   CircleHelp,
-  Command,
   FolderGit2,
   FolderInput,
   GitBranch,
   GitPullRequest,
-  Inbox,
   Layers,
   LayoutDashboard,
   ListTodo,
   LoaderCircle,
-  MoreHorizontal,
   Menu,
   Plus,
   Search,
@@ -47,7 +43,6 @@ import {
   Issue,
   Plan,
   Plugin,
-  priorities,
   Project,
   Repository,
   Run,
@@ -115,19 +110,19 @@ function App() {
   );
   const [settingsSection, setSettingsSection] = useState("general");
   const [mobileNav, setMobileNav] = useState(false);
-  const [queueOnly, setQueueOnly] = useState(false);
   const [project, setProject] = useState("");
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [error, setError] = useState("");
+  const [disconnected, setDisconnected] = useState(false);
   const [notice, setNotice] = useState("");
   const [events, setEvents] = useState<Event[]>([]);
   const [busy, setBusy] = useState(false);
-  const [showCanceled, setShowCanceled] = useState(false);
   const refresh = useCallback(async () => {
     const next = await api<Snapshot>("/snapshot");
     setCSRF(next.csrf);
     setData(next);
+    setDisconnected(false);
     setWorkspaceID((current) =>
       next.workspaces.some((w) => w.id === current)
         ? current
@@ -147,9 +142,14 @@ function App() {
       clearTimeout(timer);
       timer = window.setTimeout(() => refresh().catch(() => {}), 250);
     };
-    es.onerror = () => {};
+    es.onerror = () => setDisconnected(true);
+    es.onopen = () => refresh().catch(() => setDisconnected(true));
+    const retry = window.setInterval(() => {
+      refresh().catch(() => setDisconnected(true));
+    }, 5000);
     return () => {
       es.close();
+      clearInterval(retry);
       clearTimeout(timer);
     };
   }, [refresh]);
@@ -247,9 +247,6 @@ function App() {
   const selectedConnection = data.integrations.find(
     (i) => i.id === settingsSection && i.workspaceId === workspaceID,
   );
-  const queue = (data.queue || []).filter(
-    (e) => e.workspaceId === workspaceID && e.state === "pending",
-  );
   const repos = data.repositories.filter((r) => r.workspaceId === workspaceID),
     projects = data.projects.filter((p) => p.workspaceId === workspaceID);
   const issues = data.issues.filter(
@@ -257,7 +254,6 @@ function App() {
       i.workspaceId === workspaceID &&
       i.workflowState !== "untracked" &&
       (!project || i.projectId === project) &&
-      (!queueOnly || queue.some((e) => e.issueId === i.id)) &&
       `${i.title} ${i.identifier} ${i.labels?.join(" ")}`
         .toLowerCase()
         .includes(query.toLowerCase()),
@@ -486,6 +482,11 @@ function App() {
             </button>
           </div>
         </header>
+        {disconnected && (
+          <div className="error-banner" role="alert">
+            Server connection lost. Displayed data may be out of date. Start autopilot-cloud start or reconnect to your server. Retrying…
+          </div>
+        )}
         {error && !modal && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
@@ -2019,8 +2020,8 @@ function IssueForm({
   const [title, setTitle] = useState(issue?.title || ""),
     [description, setDescription] = useState(issue?.description || ""),
     [acceptance, setAcceptance] = useState(issue?.acceptance || ""),
-    [status, setStatus] = useState(issue?.status || initialStatus || "backlog"),
-    [priority, setPriority] = useState(issue?.priority || 0),
+    [status] = useState(issue?.status || initialStatus || "backlog"),
+    [priority] = useState(issue?.priority || 0),
     [project, setProject] = useState(issue?.projectId || projectID),
     [labels, setLabels] = useState(issue?.labels?.join(", ") || ""),
     [body, setBody] = useState(""),
@@ -3102,6 +3103,6 @@ function IntegrationForm({
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <AppBoundary><App /></AppBoundary>
   </React.StrictMode>,
 );

@@ -1,5 +1,9 @@
 # Cloud source baseline
 
+> Historical audit of `8fd2bf1341b8457d3be3d2e90c18a2a0ddae7b8d`.
+> Subsequent cleanup and current commands are documented in
+> [the implementation handoff](local-pwa-handoff.md) and [local installation](local-install.md).
+
 The `autopilot-cloud` branch tracks the Go/React application under `cloud/`. This
 baseline imports the existing application without changing its behavior. The
 earlier Bun/macOS application is preserved at

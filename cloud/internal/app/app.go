@@ -34,6 +34,15 @@ type Config struct {
 }
 
 func LoadConfig(dir string) (Config, error) {
+	return loadConfig(dir, "isolated")
+}
+
+// Local starts reuse host CLI authentication; explicit settings still take precedence.
+func LoadLocalConfig(dir string) (Config, error) {
+	return loadConfig(dir, "host")
+}
+
+func loadConfig(dir, environment string) (Config, error) {
 	if dir == "" {
 		var err error
 		dir, err = DefaultDataDir()
@@ -45,13 +54,13 @@ func LoadConfig(dir string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	c := Config{DataDir: abs, Address: "127.0.0.1:4780", AllowedHosts: []string{"127.0.0.1:4780", "localhost:4780", "127.0.0.1:5174", "localhost:5174"}, MaxWorkers: 3, MaxOrchestrators: 1, RetentionDays: 7, ExecutionEnvironment: "isolated"}
+	c := Config{DataDir: abs, Address: "127.0.0.1:4780", AllowedHosts: []string{"127.0.0.1:4780", "localhost:4780", "127.0.0.1:5174", "localhost:5174"}, MaxWorkers: 3, MaxOrchestrators: 1, RetentionDays: 7, ExecutionEnvironment: environment}
 	b, err := os.ReadFile(filepath.Join(abs, "settings.json"))
 	if err == nil {
 		err = json.Unmarshal(b, &c)
 	}
 	if err != nil && !os.IsNotExist(err) {
-		return c, err
+		return c, fmt.Errorf("read settings %s: %w", filepath.Join(abs, "settings.json"), err)
 	}
 	if v := os.Getenv("AUTOPILOT_LISTEN"); v != "" {
 		c.Address = v

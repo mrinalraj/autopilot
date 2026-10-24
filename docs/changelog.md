@@ -29,10 +29,11 @@ the changelog's introductory text or other versions.
 ## When a release is requested
 
 1. Move the Unreleased entries to `## [<version>] - YYYY-MM-DD`, using the release date. Keep a new
-   `## [Unreleased]` section at the top and update `package.json` as part of the release commit.
+   `## [Unreleased]` section at the top and update the application version as part of an explicitly authorized release commit. Historical Bun release tooling remains on `obselete`.
 2. Export that exact version with `bun run changelog <version> > /tmp/autopilot-release-notes.md`.
-3. Follow the release process in `CLAUDE.md`, passing
-   `--notes-file /tmp/autopilot-release-notes.md` to its `gh release create` command.
+3. Obtain explicit release authorization and review the distribution targets/signing policy.
+   `make package` only builds local artifacts; it does not publish a release. The historical
+   Bun/macOS release process remains on `obselete`.
 
 Keep notes on pending branches under Unreleased. When branches overlap, merge their entries and
 remove duplicates rather than replacing one branch's notes with another's.

@@ -43,11 +43,11 @@ allow `main` in the `github-pages` environment. See the
   URLs in `site/index.html`. Configure the custom domain in GitHub Pages settings; the site's
   relative asset paths work at a domain root or under a project subpath.
 
-Current-feature copy is grounded in the project README. The roadmap contains one user-provided
+The site describes the published legacy beta; its matching README is on `obselete`. The roadmap contains one user-provided
 plan: developing and installing plugins for trackers, LLMs, and launchers. It is labeled planned.
 All product captures use fictional tickets, repos, accounts, email addresses, paths, and PRs.
 The native-app installation tab includes the public beta's signing and first-launch note.
-Keep commands and requirements in sync with README.md when releasing.
+Keep legacy release links intact; cloud installation is documented separately.
 
 ## Accessibility and assets
 
@@ -60,21 +60,14 @@ The launch film uses Happy Beats / Business Moves Vol. 12 by ende.app and Kenney
 effects bundled with the brag skill. The product mark matches the app’s current gradient A. The GitHub mark and CLI terminal icon
 are local SVGs, so their rendering does not depend on an icon font or third-party CDN.
 
-## Regenerate product previews
+## Archived product previews
 
-Run `TZ=UTC bun scripts/generate-site-previews.ts`. This renders `.dev/site-fixtures/` using
-`src/web/views/dashboard.ts`, `src/web/views/settings.ts`, and the production stylesheet.
-The script supplies a fixed fictional dataset and does not load app configuration, stored
-tickets, credentials, or tracker APIs. No user-supplied screenshot is copied into these outputs.
-
-Serve the fixture directory on a loopback port, capture at a 1440×1000 CSS viewport, and save:
-
-- `dashboard.html` → `app-dashboard.jpg`.
-- `settings.html` → `app-settings.jpg`.
-- `dashboard.html#m-APP-142` → `app-approval.jpg` (scroll the modal until Launch is visible).
-
-`launched.html` and `merged.html` provide successive states of the same fictional ticket for
-the launch film. Keep the source captures outside `site/`; only the final cropped images ship.
+The existing captures and video describe the published Bun/macOS beta and remain
+available with its release links. The old fixture generator and runtime have been
+retired on this branch. To regenerate those historical images, use
+[`obselete`](https://github.com/mrinalraj/autopilot/tree/obselete) at
+`5473a457a27272aaabcaa6d7109dbcdd39e2b545` in a separate checkout and follow its
+website instructions. The static site has no build dependency on that runtime.
 
 Validation covered Chrome layouts at 320–1440 CSS pixels, gallery tabs and full-size viewing,
 keyboard navigation, install command copying, video playback, and project-subpath asset URLs.

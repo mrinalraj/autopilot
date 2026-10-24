@@ -144,7 +144,7 @@ Initial implemented providers remain GitHub and GitLab. Bitbucket continues to s
 
 ## 7. Launcher and agent contracts
 
-Preserve the older application's launcher behaviors from [`src/workspaces/types.ts`](../src/workspaces/types.ts):
+Preserve the older application's launcher behaviors from [`src/workspaces/types.ts`](https://github.com/mrinalraj/autopilot/blob/obselete/src/workspaces/types.ts):
 
 | Existing operation | Shared-core/adapter responsibility |
 |---|---|
@@ -155,7 +155,7 @@ Preserve the older application's launcher behaviors from [`src/workspaces/types.
 | `removeWorktree(repoPath, path, branch, force)` | Delegate to guarded repository lifecycle; no implicit force |
 | `link(worktreePath)` | Optional tool deep link; absence is explicit |
 
-Existing adapter inventory: Git/terminal, Worktrunk, Superset, Supacode, VS Code and Cursor (`src/workspaces/launch.ts`). Preserve behavioral compatibility while porting adapters; do not imply the existing TypeScript implementations already run inside the Go application.
+Existing adapter inventory: Git/terminal, Worktrunk, Superset, Supacode, VS Code and Cursor ([archived launcher source](https://github.com/mrinalraj/autopilot/blob/obselete/src/workspaces/launch.ts)). Preserve behavioral compatibility while porting adapters; do not imply the existing TypeScript implementations already run inside the Go application.
 
 The repository service owns creation/discovery/removal once; launcher adapters must not each create a second worktree. Keep a compatibility facade for older tooling that combines worktree preparation and launch.
 

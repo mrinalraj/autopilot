@@ -1,6 +1,6 @@
 # Autopilot Cloud
 
-A Go + React implementation of the [Autopilot Cloud plan](../docs/autopilot-cloud-plan.md), kept alongside the existing desktop application in this worktree. It provides a horizontal issue board, approved task plans, isolated Git worktrees, and persistent agent terminals for a single trusted operator.
+A Go + React implementation of the [Autopilot Cloud plan](../docs/autopilot-cloud-plan.md), with a local browser/PWA distribution and Docker server mode. The older application is archived on `obselete`. It provides a horizontal issue board, approved task plans, isolated Git worktrees, and persistent agent terminals for a single trusted operator.
 
 ## Run locally
 
@@ -9,7 +9,7 @@ Requires Go 1.26, Bun 1.3, Git, and tmux. Build an executable with the UI embedd
 ```sh
 cd cloud
 make build
-./bin/autopilot serve
+./bin/autopilot-cloud start
 ```
 
 Open **http://127.0.0.1:4780**. Persistent state is stored outside the checkout:
@@ -28,15 +28,15 @@ Create a workspace, attach or clone repositories, create an issue, and save and 
 
 For frontend development, run `make dev` in `cloud/` and `bun run dev` in `cloud/web/`. Vite serves port 5174 and proxies the Go API and terminal connections.
 
-To test with Git and agent CLIs already configured on your Mac or Linux machine, set `"executionEnvironment": "host"` in your data directory's `settings.json`, or start with:
+To test with Git and agent CLIs already configured on your Mac or Linux machine, use `start`, set `"executionEnvironment": "host"` in your data directory's `settings.json`, or start with:
 
 ```sh
-AUTOPILOT_EXECUTION_ENVIRONMENT=host ./bin/autopilot serve
+AUTOPILOT_EXECUTION_ENVIRONMENT=host ./bin/autopilot-cloud start
 ```
 
 Host mode uses your existing home directory, account identity (including Claude's macOS Keychain lookup), SSH agent, and configured CLI/XDG directories. Git, worktree setup commands, and agent processes use the same environment. Database state and managed worktrees remain under the app data directory. It forwards only these selected configuration variables; parent-session credentials and API keys are not automatically inherited. Harness `secretRefs` can provide an explicitly selected API key when needed.
 
-The default `isolated` mode uses `agent-home/` inside the app data directory and is intended for the Docker/server installation. This worktree's local test installation is configured for `host` mode with a fresh database outside the repository. Its previous Docker volume is retained while Docker is stopped.
+The `serve`/Docker default `isolated` mode uses `agent-home/` inside the app data directory and is intended for the Docker/server installation. `start` defaults to host mode; explicit settings/environment override this. See [local installation](../docs/local-install.md) for packaging, stopping, upgrades and PWA installation.
 
 ## Run with Docker
 

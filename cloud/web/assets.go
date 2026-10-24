@@ -2,7 +2,6 @@
 package web
 
 import (
-	"embed"
 	"io/fs"
 	"os"
 )
@@ -19,4 +18,3 @@ func Assets() fs.FS {
 }
 
 var releaseAssets fs.FS
-var _ embed.FS

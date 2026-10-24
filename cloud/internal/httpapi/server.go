@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"net/url"
+	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +22,8 @@ import (
 	"github.com/mrinalraj/autopilot/cloud/internal/repos"
 	"github.com/mrinalraj/autopilot/cloud/internal/storage"
 )
+
+var hashedAsset = regexp.MustCompile(`^assets/[^/]+-[A-Za-z0-9_-]{8,}\.(js|css|woff2?|png|svg)$`)
 
 type Actor struct {
 	Role        string
@@ -68,6 +73,7 @@ func (s *Server) actor(r *http.Request) (Actor, error) {
 	return Actor{Role: "human"}, nil
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
@@ -118,32 +124,45 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", 405)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/")
-	if path == "" {
-		path = "index.html"
+	name := strings.TrimPrefix(r.URL.Path, "/")
+	if name == "" {
+		name = "index.html"
 	}
-	if !fs.ValidPath(path) {
+	if !fs.ValidPath(name) {
 		http.NotFound(w, r)
 		return
 	}
-	b, e := fs.ReadFile(s.Assets, path)
-	if e != nil {
-		b, e = fs.ReadFile(s.Assets, "index.html")
-		path = "index.html"
+	b, e := fs.ReadFile(s.Assets, name)
+	// Only document navigations may use the SPA fallback. Missing scripts and
+	// public PWA resources must fail rather than returning HTML with status 200.
+	if e != nil && path.Ext(name) == "" && !strings.HasPrefix(name, "assets/") &&
+		!strings.HasPrefix(name, "icons/") && strings.Contains(r.Header.Get("Accept"), "text/html") {
+		name = "index.html"
+		b, e = fs.ReadFile(s.Assets, name)
 	}
 	if e != nil {
-		http.Error(w, "Build the web app first: cd web && bun run build", 503)
+		if name == "index.html" {
+			http.Error(w, "UI assets unavailable; run make build in cloud/ and use the resulting binary", 503)
+		} else {
+			http.NotFound(w, r)
+		}
 		return
 	}
-	switch {
-	case strings.HasSuffix(path, ".js"):
-		w.Header().Set("Content-Type", "application/javascript")
-	case strings.HasSuffix(path, ".css"):
-		w.Header().Set("Content-Type", "text/css")
-	case strings.HasSuffix(path, ".html"):
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	contentType := mime.TypeByExtension(path.Ext(name))
+	if name == "manifest.webmanifest" {
+		contentType = "application/manifest+json"
 	}
-	w.Write(b)
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	if hashedAsset.MatchString(name) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
+	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+	if r.Method != "HEAD" {
+		w.Write(b)
+	}
 }
 func actor(r *http.Request) Actor { return r.Context().Value(actorKey{}).(Actor) }
 func human(r *http.Request) error {

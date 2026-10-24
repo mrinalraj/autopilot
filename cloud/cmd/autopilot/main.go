@@ -26,6 +26,8 @@ import (
 	"github.com/mrinalraj/autopilot/cloud/web"
 )
 
+var revision = "development"
+
 func main() {
 	if e := run(); e != nil {
 		slog.Error("autopilot", "error", e)
@@ -44,7 +46,7 @@ func run() error {
 	}
 	switch command {
 	case "version":
-		fmt.Println("autopilot-cloud 0.1.0")
+		fmt.Println("autopilot-cloud 0.1.0 (" + revision + ")")
 		return nil
 	case "agent-exec":
 		if len(args) != 1 {
@@ -53,31 +55,41 @@ func run() error {
 		return runner.ExecAgent(args[0])
 	case "supervise":
 		return supervise()
+	case "start":
+		return serve(true)
 	case "serve":
-		return serve()
+		return serve(false)
 	case "tools":
 		return installTool(args)
 	case "backup":
 		return backup(args)
 	case "help", "--help", "-h":
-		fmt.Println("autopilot serve | supervise | version | snapshot | events | plan --file plan.json | report --state STATE --message TEXT | followup --run ID --message TEXT | changes create --run ID --repository ID --title TITLE --body TEXT\nConfiguration: AUTOPILOT_DATA_DIR, AUTOPILOT_LISTEN, AUTOPILOT_ALLOWED_HOSTS")
+		fmt.Println("autopilot-cloud start (local host mode) | serve (isolated server mode) | supervise | version | snapshot | events | plan --file plan.json | report --state STATE --message TEXT | followup --run ID --message TEXT | changes create --run ID --repository ID --title TITLE --body TEXT\nConfiguration: AUTOPILOT_DATA_DIR, AUTOPILOT_LISTEN, AUTOPILOT_ALLOWED_HOSTS")
 		return nil
 	default:
 		return client(command, args)
 	}
 }
-func serve() error {
+func serve(local bool) error {
 	cfg, e := loadConfig()
+	if local {
+		cfg, e = app.LoadLocalConfig(os.Getenv("AUTOPILOT_DATA_DIR"))
+	}
 	if e != nil {
 		return e
+	}
+	for _, name := range []string{"git", "tmux"} {
+		if _, e := exec.LookPath(name); e != nil {
+			return fmt.Errorf("%s is required; install Git and tmux (macOS: brew install git tmux; Debian/Ubuntu: apt install git tmux) and ensure they are on PATH", name)
+		}
 	}
 	listener, e := net.Listen("tcp", cfg.Address)
 	if e != nil {
-		return e
+		return fmt.Errorf("listen on %s: %w; stop the existing server or set AUTOPILOT_LISTEN and AUTOPILOT_ALLOWED_HOSTS to an unused address", cfg.Address, e)
 	}
 	defer listener.Close()
 	if e = os.MkdirAll(cfg.DataDir, 0700); e != nil {
-		return e
+		return fmt.Errorf("create data directory %s: %w; set AUTOPILOT_DATA_DIR to a writable directory", cfg.DataDir, e)
 	}
 	lock, e := os.OpenFile(filepath.Join(cfg.DataDir, "server.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if e != nil {
@@ -85,7 +97,7 @@ func serve() error {
 	}
 	defer lock.Close()
 	if e = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
-		return fmt.Errorf("another server owns this data directory")
+		return fmt.Errorf("another server owns data directory %s; stop it or set AUTOPILOT_DATA_DIR to a separate directory", cfg.DataDir)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	os.Setenv("PATH", filepath.Join(cfg.DataDir, "tools", "bin")+":"+os.Getenv("PATH"))
@@ -120,7 +132,7 @@ func serve() error {
 		defer c()
 		server.Shutdown(stop)
 	}()
-	slog.Info("Autopilot ready", "address", cfg.Address, "data", cfg.DataDir)
+	slog.Info("Autopilot ready", "url", a.APIURL, "data", cfg.DataDir, "executionEnvironment", cfg.ExecutionEnvironment)
 	e = server.Serve(listener)
 	if errors.Is(e, http.ErrServerClosed) {
 		return nil

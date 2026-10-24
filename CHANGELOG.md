@@ -15,6 +15,19 @@ Earlier history remains in Git commits, tags and GitHub releases; this file star
 
 ### Added
 
+- Relocatable Go/React packages for macOS and Linux (arm64/amd64), with an isolated
+  `autopilot-cloud` install command and a local browser start command.
+- Installable PWA identity/icons and an offline explanation; private API data and
+  actions are never cached or replayed. Open windows report lost backend connectivity.
+
+### Changed
+
+- Retired the Bun/macOS runtime, dependencies, native build paths and legacy preview
+  generator from this branch. Their full source remains on `obselete`; published
+  releases, existing installations and the static marketing site are preserved.
+
+### Earlier additions
+
 - The Go/React cloud application is now tracked alongside the existing macOS application,
   establishing a reproducible source baseline for local packaging and PWA work.
 - A static launch website with an interactive app preview gallery, the 20-second product film,

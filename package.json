@@ -1,34 +1,13 @@
 {
-  "name": "autopilot",
-  "version": "0.1.0-beta.10",
+  "name": "autopilot-repository",
   "private": true,
   "type": "module",
-  "repository": "mrinalraj/autopilot",
-  "license": "MIT",
-  "bin": {
-    "autopilot": "src/cli.ts"
-  },
   "scripts": {
-    "start": "bun run src/cli.ts start",
-    "once": "bun run src/cli.ts once",
-    "login": "bun run src/cli.ts login",
-    "reset": "bun run src/cli.ts reset",
-    "cli": "bun run src/cli.ts",
-    "build": "scripts/build.sh",
-    "build:app": "scripts/build-app.sh",
-    "build:release": "scripts/build.sh && scripts/build-app.sh",
-    "cask": "scripts/brew-cask.sh",
-    "changelog": "bun scripts/changelog.ts",
-    "test": "bun test",
-    "test:app": "bun scripts/test-app.ts",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "latest",
-    "@modelcontextprotocol/sdk": "^1.32.1"
-  },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "typescript": "^5"
+    "start": "make start",
+    "build": "make build",
+    "package": "make package",
+    "test": "make test",
+    "typecheck": "make typecheck",
+    "changelog": "bun scripts/changelog.ts"
   }
 }

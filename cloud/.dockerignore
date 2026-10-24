@@ -6,3 +6,4 @@ web/test-results
 web/playwright-report
 .git
 **/*.log
+dist

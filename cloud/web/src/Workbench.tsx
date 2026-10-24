@@ -12,7 +12,6 @@ import {
   Plus,
   RefreshCw,
   TerminalSquare,
-  X,
 } from "lucide-react";
 import { api } from "./api";
 import {
