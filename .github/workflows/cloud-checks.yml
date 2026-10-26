@@ -1,0 +1,62 @@
+name: Cloud checks
+
+on:
+  push:
+    branches: [autopilot-cloud]
+  pull_request:
+    branches: [autopilot-cloud]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.2'
+          cache-dependency-path: cloud/go.sum
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install runtime test dependencies
+        run: sudo apt-get update && sudo apt-get install -y git tmux
+      - name: Test and vet
+        run: make test
+      - name: Build embedded application
+        run: make build
+      - name: Test embedded assets
+        working-directory: cloud
+        run: go test -mod=readonly -tags webassets ./...
+      - name: Verify relocated local application
+        run: python3 cloud/tests/local_smoke.py cloud/bin/autopilot-cloud
+      - name: Install test browser
+        working-directory: cloud/web
+        run: bunx playwright install --with-deps chromium
+      - name: Verify browser workflows and PWA
+        working-directory: cloud/web
+        run: bun run test
+      - name: Build all supported packages
+        run: make package
+      - name: Verify Linux install and upgrade
+        run: python3 cloud/tests/package_smoke.py cloud/dist/autopilot-cloud-linux-amd64.tar.gz
+      - name: Retain browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failures
+          path: cloud/web/test-results/
+          retention-days: 7

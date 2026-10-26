@@ -17,17 +17,19 @@ dashboard, approval dialog, and settings; each image opens at full size. The vid
 
 ## Publish with GitHub Pages
 
-1. Commit `site/` and `.github/workflows/pages.yml` to the repository and merge into `main`.
+1. Commit `site/` and `.github/workflows/pages.yml` to the repository's default branch.
 2. In the GitHub repository, open **Settings → Pages → Build and deployment** and set
    **Source** to **GitHub Actions**.
-3. Open **Actions → Deploy website to GitHub Pages → Run workflow**, selecting `main`.
-   Future pushes to `main` that change `site/` also deploy automatically.
+3. Open **Actions → Deploy website to GitHub Pages → Run workflow**, selecting the default branch.
+   Future pushes to that branch that change `site/` also deploy automatically.
 4. Open the URL shown on the deployment. For `mrinalraj/autopilot`, the default URL is
    https://mrinalraj.github.io/autopilot/.
 
-The workflow deploys from `main` only and uses GitHub's built-in token with Pages/OIDC
-permissions; no personal access token is needed. If the environment has branch restrictions,
-allow `main` in the `github-pages` environment. See the
+The workflow accepts pushes from `main` and `autopilot-cloud`, but deploys only when
+the source is the repository's current default branch. It uses GitHub's built-in token
+with Pages/OIDC permissions; no personal access token is needed. Before changing the
+default to `autopilot-cloud`, allow that branch in the `github-pages` environment.
+See the [branch transition checklist](default-branch-transition.md) and the
 [GitHub Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
 
 ## Customize

@@ -22,6 +22,8 @@ Earlier history remains in Git commits, tags and GitHub releases; this file star
 
 ### Changed
 
+- Prepare the cloud branch for default-branch promotion with automated build, PWA
+  and installation checks; retain legacy website documentation links on `obselete`.
 - Retired the Bun/macOS runtime, dependencies, native build paths and legacy preview
   generator from this branch. Their full source remains on `obselete`; published
   releases, existing installations and the static marketing site are preserved.

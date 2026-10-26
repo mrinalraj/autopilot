@@ -2,7 +2,7 @@ name: Deploy website to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, autopilot-cloud]
     paths:
       - 'site/**'
       - '.github/workflows/pages.yml'
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     permissions:
       contents: read
