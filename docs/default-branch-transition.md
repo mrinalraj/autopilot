@@ -1,14 +1,14 @@
 # Default branch transition
 
-Prepared on 26 October 2026. The requested destination is `autopilot-cloud`;
-keep that branch name and change GitHub's default, without rewriting `main`.
-The repository setting has not been changed by this preparation.
+Approved on 26 October 2026: rename `autopilot-cloud` to `master`, push the final
+changes and make `master` the repository default. Keep `main` and `obselete` at
+the old application's revision. CI and GitHub Pages follow `master`.
 
 ## Verified source and archive
 
 | Ref | Verified revision | Role |
 | --- | --- | --- |
-| `origin/main` | `5473a457a27272aaabcaa6d7109dbcdd39e2b545` | Current default; old Bun/macOS app |
+| `origin/main` | `5473a457a27272aaabcaa6d7109dbcdd39e2b545` | Previous default; old Bun/macOS app |
 | `origin/obselete` | `5473a457a27272aaabcaa6d7109dbcdd39e2b545` | Existing remote archive, identical to `main` |
 | `8fd2bf1` | `8fd2bf1341b8457d3be3d2e90c18a2a0ddae7b8d` | Reproducible Go/React baseline |
 | `5042ed5` | `5042ed59e266ec7fd6f28860932a18d4fd34616f` | PWA/local packaging and retirement of old runtime |
@@ -22,8 +22,8 @@ use it. Do not push `private-history`. Existing releases and tags stay unchanged
 
 - `cloud-checks.yml` runs Go race tests/vet, embedded builds/tests, isolated local
   startup checks, all browser/PWA tests, four package builds and Linux installation
-  smoke checks on cloud-branch pushes and pull requests. It publishes no releases.
-- The Pages workflow on the candidate accepts `main`/`autopilot-cloud` pushes but
+  smoke checks on `master` pushes and pull requests. It publishes no releases.
+- The Pages workflow accepts `master` pushes but
   deploys only from the current default. Its manual trigger remains available.
 - The legacy site's setup/installation/documentation links explicitly target
   `obselete`, so they survive a new root README. Product artwork, existing release
@@ -52,7 +52,11 @@ Actual installation through an OS browser menu, Safari/mobile acceptance and Doc
 runtime testing remain outside these checks. Other architectures were cross-built,
 not run locally. The earlier intermittent coordinator attachment failure documented
 in `local-pwa-handoff.md` did not recur; this is not a claim that it was fixed.
-Require a green Cloud checks run for the pushed preparation commit before switching.
+The full Linux [Cloud checks run](https://github.com/mrinalraj/autopilot/actions/runs/40334137188)
+passed on `5af72287e64289f5ce76ef27c9b3f8b9010dcb32`, including all six browser
+workflows, four clean package builds and Linux installation/upgrade verification.
+The rename changes workflow branch filters, documentation and local-only ignore rules;
+it does not change the tested application code.
 
 The first Linux CI run exposed a fixture portability bug: the test harness invoked
 `/bin/sh --version` for availability, which works with macOS's shell but fails with
@@ -61,30 +65,31 @@ fake harnesses handle `--version` without entering their agent loops. The workbe
 test explicitly checks that its launcher is enabled. Production code and test
 timeouts were not changed; this is separate from the prior attachment issue.
 
-## Apply after approval
+## Cutover procedure
 
 Use the personal `mrinalraj` GitHub credentials for these repository settings; the
 currently active CLI account `mrinalraj1` cannot administer this repository. Select
 the personal token for individual commands without changing the global active login.
 Personal credentials were verified to have repository admin access.
 
-1. Fetch origin again and verify the archive still contains the old default tip.
-   Confirm the candidate includes the two audited commits and the preparation commit.
-   Check the Cloud checks workflow for that exact candidate commit.
+1. Verify `main` and `obselete` retain the old default tip and the candidate includes
+   the audited application and preparation commits. Rename the remote branch using
+   GitHub's branch rename API, rename the current local branch to `master`, and set
+   its upstream to `origin/master`. Push the final branch-filter/documentation changes.
 2. In **Settings → Environments → github-pages → Deployment branches**, change the
-   existing `main` branch rule (ID `64056869` at preparation time) to `autopilot-cloud`.
+   existing `main` branch rule (ID `64056869` at preparation time) to `master`.
    The environment currently uses custom branch policies. Replace the rule rather
    than leaving both: old `main` still contains its original Pages workflow, which
    does not check the repository's default branch.
-3. Change **Settings → Branches → Default branch** from `main` to `autopilot-cloud`
-   (CLI: `gh repo edit mrinalraj/autopilot --default-branch autopilot-cloud`). Do not
-   rename/delete branches, move `main`, publish a release or touch installed data.
-4. Run **Deploy website to GitHub Pages** on `autopilot-cloud` so the existing site's
+3. Change **Settings → Branches → Default branch** from `main` to `master`
+   (CLI: `gh repo edit mrinalraj/autopilot --default-branch master`). Do not move `main`,
+   publish a release or touch installed data.
+4. Run **Deploy website to GitHub Pages** on `master` so the existing site's
    corrected legacy documentation links reach the published site. This deploys the
    static site only, not the application or packages.
 5. Verify the default via the repository API, check the Pages deployment and links,
    then run `git remote set-head origin -a`. Existing local `main` checkouts remain
-   on the old code; new clones will use `autopilot-cloud`.
+   on the old code; new clones will use `master`.
 
 There were no open pull requests, repository rulesets or protected branches at
 preparation time. Recheck before applying; if any have appeared, review their base
@@ -96,3 +101,10 @@ Restore GitHub's default to `main` and the Pages environment rule to `main`, the
 refresh `origin/HEAD`. No Git history needs resetting. The old default and archive
 are preserved throughout. Application data and existing installations are separate
 from the default-branch setting.
+
+## Local removal
+
+The GitHub repository preserves committed source, plans and documentation. It does
+not back up ignored files, local agent skills, credentials, unpushed private history
+or the runtime database/settings under `~/Library/Application Support/Autopilot Cloud`.
+Preserve those separately before erasing the computer if they are still needed.

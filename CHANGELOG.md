@@ -22,6 +22,8 @@ Earlier history remains in Git commits, tags and GitHub releases; this file star
 
 ### Changed
 
+- Use `master` as the active development/default branch; the old application stays
+  archived on `obselete`. CI and website deployment follow `master`.
 - Prepare the cloud branch for default-branch promotion with automated build, PWA
   and installation checks; retain legacy website documentation links on `obselete`.
 - Retired the Bun/macOS runtime, dependencies, native build paths and legacy preview

@@ -2,7 +2,7 @@ name: Deploy website to GitHub Pages
 
 on:
   push:
-    branches: [main, autopilot-cloud]
+    branches: [master]
     paths:
       - 'site/**'
       - '.github/workflows/pages.yml'

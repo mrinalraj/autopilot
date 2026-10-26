@@ -25,11 +25,10 @@ dashboard, approval dialog, and settings; each image opens at full size. The vid
 4. Open the URL shown on the deployment. For `mrinalraj/autopilot`, the default URL is
    https://mrinalraj.github.io/autopilot/.
 
-The workflow accepts pushes from `main` and `autopilot-cloud`, but deploys only when
-the source is the repository's current default branch. It uses GitHub's built-in token
-with Pages/OIDC permissions; no personal access token is needed. Before changing the
-default to `autopilot-cloud`, allow that branch in the `github-pages` environment.
-See the [branch transition checklist](default-branch-transition.md) and the
+The workflow accepts pushes from `master` and deploys only when it is the repository's
+current default branch. It uses GitHub's built-in token with Pages/OIDC permissions;
+no personal access token is needed. The `github-pages` environment allows `master`.
+See the [branch transition record](default-branch-transition.md) and the
 [GitHub Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
 
 ## Customize

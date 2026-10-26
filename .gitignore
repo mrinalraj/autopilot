@@ -9,3 +9,8 @@ dist/
 packaging/
 .dev/
 .envrc
+# Local agent skills and launch-video workspace
+/.agents/
+/.claude/skills/
+/skills-lock.json
+/brag-output/

@@ -2,9 +2,9 @@ name: Cloud checks
 
 on:
   push:
-    branches: [autopilot-cloud]
+    branches: [master]
   pull_request:
-    branches: [autopilot-cloud]
+    branches: [master]
   workflow_dispatch:
 
 permissions:
