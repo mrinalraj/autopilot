@@ -11,6 +11,7 @@ const planner = join(data, "fake-planner.ts");
 writeFileSync(
   planner,
   `#!/usr/bin/env bun
+if(process.argv.includes("--version")){console.log("Test Planner 1.0");process.exit(0)}
 const headers={"Content-Type":"application/json","Authorization":"Bearer "+process.env.AUTOPILOT_TOKEN,"X-Autopilot-Session":process.env.AUTOPILOT_SESSION_ID,"X-Autopilot-Generation":process.env.AUTOPILOT_GENERATION};
 async function request(path,body){const response=await fetch(process.env.AUTOPILOT_URL+"/api/v1"+path,{headers,method:body?"POST":"GET",body:body?JSON.stringify(body):undefined});if(!response.ok)throw new Error(await response.text());return response.json()}
 async function plan(){const s=await request("/snapshot");for(const i of s.issues.filter(i=>!i.planIds?.length&&i.status!=="done"&&i.status!=="canceled")){await request("/plans",{workspaceId:i.workspaceId,issueId:i.id,title:"Plan: "+i.title,summary:"Fake coordinator plan",tasks:[{id:"implement",issueId:i.id,title:i.title,prompt:"Implement the ticket",harness:"test-agent",repositoryIds:s.repositories.map(r=>r.id),dependsOn:[]}]})}await request("/signal",{state:"idle",message:"Ready for triage"});console.log("PLANNER READY")}
@@ -20,7 +21,7 @@ await plan();for await(const line of console){await plan()}
 );
 writeFileSync(
   fake,
-  '#!/bin/sh\necho "FAKE AGENT READY"\nwhile IFS= read -r line; do printf "RECEIVED %s\\n" "$line"; done\n',
+  '#!/bin/sh\nif [ "${1:-}" = "--version" ]; then echo "Test Agent 1.0"; exit 0; fi\necho "FAKE AGENT READY"\nwhile IFS= read -r line; do printf "RECEIVED %s\\n" "$line"; done\n',
   { mode: 0o700 },
 );
 writeFileSync(
@@ -46,10 +47,10 @@ writeFileSync(
       {
         id: "test-agent",
         label: "Test Agent",
-        command: "/bin/sh",
-        args: [fake],
+        command: fake,
+        args: [],
         promptMode: "arg",
-        resumeArgs: [fake, "{conversation}"],
+        resumeArgs: ["{conversation}"],
       },
     ],
   }),

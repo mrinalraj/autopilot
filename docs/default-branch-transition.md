@@ -54,6 +54,13 @@ not run locally. The earlier intermittent coordinator attachment failure documen
 in `local-pwa-handoff.md` did not recur; this is not a claim that it was fixed.
 Require a green Cloud checks run for the pushed preparation commit before switching.
 
+The first Linux CI run exposed a fixture portability bug: the test harness invoked
+`/bin/sh --version` for availability, which works with macOS's shell but fails with
+Ubuntu's dash. The fixture now launches its executable script directly and both
+fake harnesses handle `--version` without entering their agent loops. The workbench
+test explicitly checks that its launcher is enabled. Production code and test
+timeouts were not changed; this is separate from the prior attachment issue.
+
 ## Apply after approval
 
 Use the personal `mrinalraj` GitHub credentials for these repository settings; the

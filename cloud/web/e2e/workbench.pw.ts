@@ -115,7 +115,9 @@ test("browse every checkout, create manual work, use shell and configure a track
     await expect(
       page.getByText("Session stopped. Open a terminal or agent below."),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Test Agent", exact: true }).click();
+    const launchAgent = page.getByRole("button", { name: "Test Agent", exact: true });
+    await expect(launchAgent).toBeEnabled();
+    await launchAgent.click();
     await expect(page.locator(".session-tab-list button.active")).toContainText(
       "Test Agent",
     );
