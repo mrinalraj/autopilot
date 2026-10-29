@@ -22,6 +22,9 @@ Earlier history remains in Git commits, tags and GitHub releases; this file star
 
 ### Changed
 
+- Add optional Sage & Cream and Ember & Ivory themes in General settings. Classic
+  remains the default; the choice persists per browser and updates open terminals
+  without reconnecting. Ember pairs soft black and warm ivory with burnt orange.
 - Use `master` as the active development/default branch; the old application stays
   archived on `obselete`. CI and website deployment follow `master`.
 - Prepare the cloud branch for default-branch promotion with automated build, PWA

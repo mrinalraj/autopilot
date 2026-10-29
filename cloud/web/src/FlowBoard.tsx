@@ -7,11 +7,11 @@ import {
 } from "lucide-react";
 import { Issue, Plan, Snapshot } from "./types";
 const lanes = [
-  { id: "triage", label: "Triage", color: "#9695a1" },
-  { id: "working", label: "Working", color: "#64a7f6" },
-  { id: "needs_you", label: "Needs you", color: "#ffac64" },
-  { id: "in_review", label: "In review", color: "#e9cb56" },
-  { id: "done", label: "Done", color: "#62cb95" },
+  { id: "triage", label: "Triage", color: "var(--lane-triage, #9695a1)" },
+  { id: "working", label: "Working", color: "var(--lane-working, #64a7f6)" },
+  { id: "needs_you", label: "Needs you", color: "var(--lane-attention, #ffac64)" },
+  { id: "in_review", label: "In review", color: "var(--lane-review, #e9cb56)" },
+  { id: "done", label: "Done", color: "var(--lane-done, #62cb95)" },
 ];
 export function FlowBoard({
   data,
