@@ -73,6 +73,7 @@ import {
 import "./workbench.css";
 import { FlowBoard } from "./FlowBoard";
 import "./terminal-workspace.css";
+import "./theme.css";
 
 type Page =
   | "coordinator"
@@ -522,7 +523,13 @@ function App() {
             />
           )}
           <div className="page-body">
-            {!workspace ? (
+            {!workspace && page === "settings" ? (
+              <GeneralSettings
+                section="general"
+                plugins={plugins}
+                onProfilesSaved={() => api<Plugin[]>("/plugins").then(setPlugins)}
+              />
+            ) : !workspace ? (
               <div className="welcome">
                 <div className="welcome-mark">
                   <Layers size={34} />

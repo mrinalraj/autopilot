@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { getTheme, subscribeTheme, terminalTheme } from "./theme";
 
 export function Terminal({ id, csrf }: { id: string; csrf: string }) {
   const element = useRef<HTMLDivElement>(null);
@@ -14,12 +15,17 @@ export function Terminal({ id, csrf }: { id: string; csrf: string }) {
       fontSize: Number(localStorage.getItem("autopilot.terminalFont") || 13),
       fontFamily: '"SFMono-Regular", Consolas, monospace',
       cursorBlink: true,
-      theme: { background: "#101115", foreground: "#e5e5ea" },
+      minimumContrastRatio: getTheme() === "classic" ? 1 : 4.5,
+      theme: terminalTheme(),
       scrollback: 5000,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(element.current!);
+    const unsubscribeTheme = subscribeTheme(() => {
+      term.options.theme = terminalTheme();
+      term.options.minimumContrastRatio = getTheme() === "classic" ? 1 : 4.5;
+    });
     fit.fit();
     const ws = new WebSocket(
       `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/v1/sessions/${id}/terminal?token=${encodeURIComponent(csrf)}`,
@@ -52,6 +58,7 @@ export function Terminal({ id, csrf }: { id: string; csrf: string }) {
       ws.onclose = null;
       ws.close();
       observer.disconnect();
+      unsubscribeTheme();
       input.dispose();
       term.dispose();
     };

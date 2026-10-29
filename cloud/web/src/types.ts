@@ -206,12 +206,12 @@ export type Snapshot = {
   changes: Change[];
 };
 export const columns = [
-  { id: "backlog", label: "Backlog", color: "#8a8d99" },
-  { id: "ready", label: "Ready", color: "#b6bbcf" },
-  { id: "in_progress", label: "In progress", color: "#e5b85d" },
-  { id: "in_review", label: "In review", color: "#a99bea" },
-  { id: "done", label: "Done", color: "#77ba94" },
-  { id: "canceled", label: "Canceled", color: "#85858a" },
+  { id: "backlog", label: "Backlog", color: "var(--lane-triage, #8a8d99)" },
+  { id: "ready", label: "Ready", color: "var(--lane-working, #b6bbcf)" },
+  { id: "in_progress", label: "In progress", color: "var(--lane-review, #e5b85d)" },
+  { id: "in_review", label: "In review", color: "var(--lane-attention, #a99bea)" },
+  { id: "done", label: "Done", color: "var(--lane-done, #77ba94)" },
+  { id: "canceled", label: "Canceled", color: "var(--lane-triage, #85858a)" },
 ];
 export const priorities = ["No priority", "Urgent", "High", "Medium", "Low"];
 export const isLive = (s: Session) =>
