@@ -13,6 +13,7 @@ import {
   Zap,
 } from "lucide-react";
 import { api } from "./api";
+import { setTheme, themes, useTheme } from "./theme";
 import {
   columns,
   Integration,
@@ -251,6 +252,7 @@ export function GeneralSettings({
   plugins: Plugin[];
   onProfilesSaved: () => void;
 }) {
+  const theme = useTheme();
   const [info, setInfo] = useState<SettingsInfo>(),
     [error, setError] = useState("");
   useEffect(() => {
@@ -335,6 +337,24 @@ export function GeneralSettings({
         </p>
       </div>
       {error && <p className="inline-error">{error}</p>}
+      {section === "general" && (
+        <section className="settings-section">
+          <h2>Appearance</h2>
+          <div className="setting-field">
+            <label htmlFor="appearance-theme">Theme</label>
+            <select
+              id="appearance-theme"
+              value={theme}
+              onChange={(e) => setTheme(e.target.value)}
+            >
+              {Object.entries(themes).map(([id, label]) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <p>Applies to this browser, including open terminals.</p>
+        </section>
+      )}
       {section === "agents"
         ? info?.profiles.map((p) => (
             <ProfileEditor

@@ -1,0 +1,1269 @@
+/* Opt-in palette and interaction overrides. Classic uses the original stylesheets. */
+:root:is([data-theme="sage"], [data-theme="ember"]) {
+  --lane-triage: var(--muted);
+  --lane-working: var(--info);
+  --lane-attention: var(--accent);
+  --lane-review: var(--warning);
+  --lane-done: var(--success);
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-optical-sizing: auto;
+  color: var(--text);
+  background: var(--canvas);
+}
+:where([data-theme="sage"], [data-theme="ember"]) button:focus-visible,
+:where([data-theme="sage"], [data-theme="ember"]) a:focus-visible {
+  outline: 2px solid var(--focus);
+}
+:where([data-theme="sage"], [data-theme="ember"]) input,
+:where([data-theme="sage"], [data-theme="ember"]) select,
+:where([data-theme="sage"], [data-theme="ember"]) textarea {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) input:focus,
+:where([data-theme="sage"], [data-theme="ember"]) select:focus,
+:where([data-theme="sage"], [data-theme="ember"]) textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--shadow-color);
+}
+:where([data-theme="sage"], [data-theme="ember"]) input::placeholder,
+:where([data-theme="sage"], [data-theme="ember"]) textarea::placeholder {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) input[type="checkbox"] {
+  accent-color: var(--focus);
+}
+:where([data-theme="sage"], [data-theme="ember"]) small {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) kbd,
+:where([data-theme="sage"], [data-theme="ember"]) .keycap {
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .keycap {
+  color: var(--text);
+  border-color: var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .primary {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px var(--shadow-color);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .secondary {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .icon-button {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .muted {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .dot {
+  background: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .dot.online {
+  background: var(--success);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .dot.offline {
+  background: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .dot.amber {
+  background: var(--warning);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .eyebrow {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .badge {
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .badge.amber {
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .badge.green {
+  color: var(--success);
+  background: var(--success-bg);
+  border-color: var(--success-border);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .badge.red {
+  color: var(--danger);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .tag {
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: var(--subtle);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .label-dot {
+  background: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .inline-error {
+  color: var(--danger);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .section-title span {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .sidebar {
+  background: var(--canvas);
+  border-right: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .brand-symbol {
+  background: var(--panel);
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .edition {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workspace-select {
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workspace-select > svg {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workspace-select button {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .nav {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .nav svg {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .nav.active {
+  background: var(--selected);
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .nav.active svg {
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .count {
+  color: var(--text);
+  background: var(--subtle);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .sidebar-section {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .sidebar-section button {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .project-nav.selected {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .project-square {
+  background: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .sidebar-hint {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .host-status {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"])
+  .host-status
+  > span:last-child {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .topbar {
+  border-bottom: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .breadcrumbs {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .breadcrumbs strong {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .slash {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .private-badge {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .page-heading p {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .heading-count {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .board-toolbar {
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .view-label {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .search {
+  border-left: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .search svg {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .search kbd {
+  color: var(--muted);
+  border-color: var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .toggle {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .toolbar-end {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .kanban {
+  scrollbar-color: var(--border-strong) transparent;
+}
+:where([data-theme="sage"], [data-theme="ember"]) .column-header strong {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .column-count {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .column-header button {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .column-cards {
+  scrollbar-color: var(--border-strong) transparent;
+}
+:where([data-theme="sage"], [data-theme="ember"]) .issue-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 3px var(--shadow-color);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .identifier {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .priority {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .priority-1 {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .priority-2 {
+  color: var(--warning);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .issue-card h3 {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .source-label {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .avatar {
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .run-indicator {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .empty-column {
+  border: 1px dashed var(--line);
+  background: var(--panel);
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .surface {
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .surface p {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .row-icon {
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .repo-row > svg {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .branch {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .plugin small {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .provider-icon {
+  background: var(--subtle);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .session-card-top {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .session-card-bottom {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .worktree {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .attention-row > svg {
+  color: var(--warning);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .empty-icon {
+  color: var(--muted);
+  background: var(--subtle);
+  border: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .empty-state p {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .welcome-mark {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .welcome p {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .welcome-foot {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .loading {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .error-banner {
+  background: var(--danger-bg);
+  border-bottom: 1px solid var(--danger-border);
+  color: var(--danger);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .toast {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  box-shadow: 0 8px 24px var(--shadow-color);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .toast svg {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  box-shadow: 0 25px 100px var(--shadow-color);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .dialog::backdrop {
+  background: var(--scrim);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .dialog-header {
+  border-bottom: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .field > span {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .field > small {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .secondary.danger {
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .repository-picker {
+  border: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .repository-picker legend {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .repository-picker small {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .segmented {
+  background: var(--subtle);
+  border: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .segmented button {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .segmented button.active {
+  background: var(--selected);
+  color: var(--accent);
+  box-shadow: 0 1px 3px var(--shadow-color);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .discovered {
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .subsection {
+  border-top: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .subsection summary {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .comment {
+  border-left: 2px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .comment strong {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .comment small {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .comment p {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .check-list {
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .plan-task {
+  border: 1px solid var(--line);
+  background: var(--subtle);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .task-number {
+  border: 1px solid var(--line);
+  background: var(--subtle);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .approval-note {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .session-detail-heading p {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-panel {
+  border: 1px solid var(--line);
+  background: var(--canvas);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-toolbar {
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-preview {
+  background: var(--canvas);
+  border: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .prompt {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .event {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .event time {
+  color: var(--muted);
+}
+@media (hover: hover) and (pointer: fine) {
+  :where([data-theme="sage"], [data-theme="ember"]) .nav:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .icon-button:hover:not(:disabled),
+  :where([data-theme="sage"], [data-theme="ember"])
+    .column-header
+    button:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .primary:hover:not(:disabled) {
+    background: var(--hover);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .secondary:hover:not(:disabled) {
+    background: var(--hover);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .issue-card:hover:not(:disabled) {
+    background: var(--hover);
+    border-color: var(--line);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .empty-column:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--line);
+    background: var(--hover);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .text-button:hover:not(:disabled),
+  :where([data-theme="sage"], [data-theme="ember"])
+    .change-link:hover:not(:disabled) {
+    color: var(--text);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .session-card:hover:not(:disabled) {
+    border-color: var(--line);
+    background: var(--hover);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .discovered:hover:not(:disabled) {
+    color: var(--accent);
+  }
+}
+:where([data-theme="sage"], [data-theme="ember"]) .tree-label {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .tree-empty {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"])
+  .repo-tree-heading
+  > button:not(:first-child) {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .worktree-nav {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .worktree-nav.active {
+  background: var(--selected);
+  color: var(--accent);
+}
+@media (hover: hover) and (pointer: fine) {
+  :where([data-theme="sage"], [data-theme="ember"])
+    .worktree-nav:hover:not(:disabled) {
+    background: var(--hover);
+  }
+}
+:where([data-theme="sage"], [data-theme="ember"]) .state-neutral {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .state-attention {
+  color: var(--warning);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .state-running {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .state-waiting {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .state-finished {
+  color: var(--success);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .repo-menu summary {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .repo-menu > div {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 30px var(--shadow-color);
+}
+@media (hover: hover) and (pointer: fine) {
+  :where([data-theme="sage"], [data-theme="ember"])
+    .repo-menu
+    button:hover:not(:disabled) {
+    background: var(--hover);
+  }
+}
+:where([data-theme="sage"], [data-theme="ember"]) .queue-filter {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .queue-filter.active {
+  background: var(--selected);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workbench-eyebrow {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workbench-branch {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workbench-branch span {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workbench-context {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .issue-chip {
+  border: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workbench-tabs {
+  border-bottom: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workbench-tabs button {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"])
+  .workbench-tabs
+  button[aria-selected="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workbench-terminal {
+  background: var(--canvas);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-tabs {
+  border-bottom: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-tabs button {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-tabs button.active {
+  color: var(--accent);
+  background: var(--selected);
+  border-bottom-color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .session-indicator {
+  background: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .session-indicator.live {
+  background: var(--success);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .session-strip {
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .session-strip button {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workbench-empty {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workbench-empty > svg {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workbench-empty h2 {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .code-output {
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workbench-form > label {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"])
+  .workbench-form
+  > label
+  small {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .danger {
+  color: var(--danger);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-nav {
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-nav > button,
+:where([data-theme="sage"], [data-theme="ember"])
+  .settings-connections
+  > button {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-nav button.active {
+  background: var(--selected);
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-connections h3 {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .connection-dot {
+  background: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .connection-dot.verified {
+  background: var(--success);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .connection-dot.error {
+  background: var(--warning);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-title p {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .plugin-category > p {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .plugin-card {
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+:where([data-theme="sage"], [data-theme="ember"])
+  .plugin-card-top
+  span:not(.plugin-mark) {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .plugin-card > p {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .plugin-mark {
+  border: 1px solid var(--line);
+  background: var(--subtle);
+  color: var(--brand-foreground);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .mark-native {
+  background: var(--brand-fill);
+  border-color: var(--brand-fill);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-section {
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-section p {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-facts dt {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-facts dd {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"])
+  .profile-editor
+  summary
+  > span:last-child {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .success-message {
+  color: var(--success) !important;
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-note {
+  border-left: 2px solid var(--line);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .candidate-row {
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 760px) {
+  :where([data-theme="sage"], [data-theme="ember"]) .nav-backdrop {
+    background: var(--scrim);
+  }
+  :where([data-theme="sage"], [data-theme="ember"]) .settings-nav {
+    border-bottom: 1px solid var(--line);
+  }
+}
+:where([data-theme="sage"], [data-theme="ember"]) .webhook-url {
+  background: var(--subtle);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .review-comment {
+  background: var(--subtle);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .header-branch {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .header-branch.pr-open {
+  color: var(--success);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .header-branch.pr-merged {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .header-branch.pr-closed {
+  color: var(--danger);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-workspace {
+  background: var(--canvas);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .compact-session-tabs {
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .session-tab-list button,
+:where([data-theme="sage"], [data-theme="ember"]) .coordinator-tab {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"])
+  .session-tab-list
+  button.active,
+:where([data-theme="sage"], [data-theme="ember"]) .coordinator-tab {
+  color: var(--accent);
+  background: var(--selected);
+  border-bottom-color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-tab-actions button {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"])
+  .terminal-tab-actions
+  button.active {
+  color: var(--accent);
+  background: var(--selected);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-connection {
+  color: var(--text);
+  background: var(--panel);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-connection button {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .quiet-terminal-empty {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .launch-dock {
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .launch-dock button {
+  color: var(--text);
+}
+@media (hover: hover) and (pointer: fine) {
+  :where([data-theme="sage"], [data-theme="ember"])
+    .launch-dock
+    button:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+  }
+}
+:where([data-theme="sage"], [data-theme="ember"]) .harness-mark {
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .harness-claude {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .harness-codex {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .harness-agy {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .worktree-inspector {
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .inspector-tabs {
+  border-bottom: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .inspector-tabs button {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"])
+  .inspector-tabs
+  button.active {
+  color: var(--accent);
+  background: var(--selected);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-board {
+  background: var(--canvas);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-toolbar {
+  border-bottom: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-lane {
+  border-right: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-lane > header {
+  border-bottom: 1px solid var(--line);
+  color: var(--lane-color);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-lane header > span {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-lane i {
+  background: var(--lane-color);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-card-title .identifier {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-card h3 {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-card-status {
+  border-top: 1px solid var(--line);
+  color: var(--lane-color);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-branch {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-plan,
+:where([data-theme="sage"], [data-theme="ember"]) .flow-change {
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-change {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-empty {
+  color: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .issue-progress {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .progress-dot {
+  background: var(--muted);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .issue-extra {
+  color: var(--muted);
+}
+/* Palette definitions. Body text stays warm; filled accents have their own text pair. */
+:root[data-theme="ember"] {
+  --brand-fill: #d5360c;
+  --brand-foreground: #fffaf4;
+  --canvas: #101010;
+  --panel: #1c1b19;
+  --subtle: #151413;
+  --hover: #302925;
+  --selected: #4b2115;
+  --text: #e6d5bd;
+  --muted: #b9ad9c;
+  --line: #49413a;
+  --border-strong: #8e7c68;
+  --accent: #f18b67;
+  --focus: #f18b67;
+  --success: #c6d0b1;
+  --success-bg: #293021;
+  --success-border: #839470;
+  --warning: #e6c397;
+  --warning-bg: #37291a;
+  --warning-border: #9b7b53;
+  --danger: #f4ad99;
+  --danger-bg: #412018;
+  --danger-border: #b56c59;
+  --info: #d1c6b4;
+  --shadow-color: rgb(0 0 0 / 0.24);
+  --scrim: rgb(0 0 0 / 0.65);
+  --primary-bg: #d5360c;
+  --primary-hover: #b82c0a;
+  --primary-text: #fffaf4;
+}
+:where([data-theme="ember"]) .sidebar,
+:where([data-theme="ember"]) .terminal-workspace,
+:where([data-theme="ember"]) .workbench-terminal,
+:where([data-theme="ember"]) .terminal-panel,
+:where([data-theme="ember"]) .terminal-preview {
+  --canvas: #101010;
+  --panel: #191817;
+  --subtle: #141312;
+  --hover: #292522;
+  color: var(--text);
+  color-scheme: dark;
+}
+:root[data-theme="sage"] {
+  --brand-foreground: #e8d2b5;
+  --brand-fill: #590907;
+  --canvas: #383e37;
+  --panel: #41483f;
+  --subtle: #30372f;
+  --hover: #4c5449;
+  --selected: #590907;
+  --text: #e8d2b5;
+  --muted: #cec6b6;
+  --line: #626a5d;
+  --border-strong: #a5a79b;
+  --accent: #f5dfc2;
+  --focus: #e8d2b5;
+  --success: #d1dbc3;
+  --success-bg: #35432e;
+  --success-border: #8a9d7e;
+  --warning: #e8d2b5;
+  --warning-bg: #4b3c29;
+  --warning-border: #b29670;
+  --danger: #f3b7a7;
+  --danger-bg: #590907;
+  --danger-border: #c28e80;
+  --info: #d4d5c5;
+  --shadow-color: rgb(18 24 16 / 0.18);
+  --scrim: rgb(18 24 16 / 0.6);
+  --primary-bg: #590907;
+  --primary-hover: #75201a;
+  --primary-text: #e8d2b5;
+  color: var(--text);
+  background: var(--canvas);
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-optical-sizing: auto;
+}
+:where([data-theme="sage"]) .sidebar,
+:where([data-theme="sage"]) .terminal-workspace,
+:where([data-theme="sage"]) .workbench-terminal,
+:where([data-theme="sage"]) .terminal-panel,
+:where([data-theme="sage"]) .terminal-preview {
+  --canvas: #2a3029;
+  --panel: #343c32;
+  --subtle: #30372f;
+  --hover: #444d40;
+  color: var(--text);
+  color-scheme: dark;
+}
+:where([data-theme="sage"], [data-theme="ember"]) body {
+  background: var(--canvas);
+}
+:where([data-theme="sage"], [data-theme="ember"]) ::selection {
+  background: var(--selected);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) button {
+  transition: none;
+}
+:where([data-theme="sage"], [data-theme="ember"]) button:active:not(:disabled) {
+  transform: none;
+}
+:where([data-theme="sage"], [data-theme="ember"]) button:disabled {
+  opacity: 0.55;
+}
+:where([data-theme="sage"], [data-theme="ember"]) button:focus-visible,
+:where([data-theme="sage"], [data-theme="ember"]) a:focus-visible,
+:where([data-theme="sage"], [data-theme="ember"]) summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+:where([data-theme="sage"], [data-theme="ember"]) input,
+:where([data-theme="sage"], [data-theme="ember"]) select,
+:where([data-theme="sage"], [data-theme="ember"]) textarea {
+  border-color: var(--border-strong);
+}
+:where([data-theme="sage"], [data-theme="ember"]) input:focus,
+:where([data-theme="sage"], [data-theme="ember"]) select:focus,
+:where([data-theme="sage"], [data-theme="ember"]) textarea:focus {
+  border-color: var(--focus);
+  box-shadow:
+    0 0 0 2px var(--panel),
+    0 0 0 4px var(--focus);
+}
+:where([data-theme="sage"], [data-theme="ember"]) input::placeholder,
+:where([data-theme="sage"], [data-theme="ember"]) textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+:where([data-theme="sage"], [data-theme="ember"]) input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .search:focus-within {
+  border-radius: 4px;
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+:where([data-theme="sage"], [data-theme="ember"]) .search input:focus {
+  box-shadow: none;
+}
+:where([data-theme="sage"], [data-theme="ember"]) .primary {
+  background: var(--primary-bg);
+  border-color: var(--primary-bg);
+  color: var(--primary-text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .secondary {
+  background: var(--panel);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .secondary.danger {
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .keycap {
+  color: inherit;
+  border-color: currentColor;
+  opacity: 1;
+}
+:where([data-theme="sage"], [data-theme="ember"]) .brand-symbol {
+  background: var(--brand-fill);
+  color: var(--brand-foreground);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .welcome-mark {
+  background: var(--brand-fill);
+  color: var(--brand-foreground);
+  border-color: var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .eyebrow {
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"])
+  .workspace-select:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+:where([data-theme="sage"], [data-theme="ember"])
+  .workspace-select
+  select:focus {
+  box-shadow: none;
+}
+:where([data-theme="sage"], [data-theme="ember"]) .workspace-select option {
+  background: var(--panel);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .nav.active,
+:where([data-theme="sage"], [data-theme="ember"]) .worktree-nav.active {
+  background: var(--selected);
+  color: var(--text);
+  box-shadow: inset 3px 0 var(--brand-foreground);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .nav.active svg {
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-nav {
+  background: var(--subtle);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .settings-nav button.active {
+  color: var(--accent);
+  background: var(--panel);
+  box-shadow: inset 3px 0 var(--brand-fill);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .topbar,
+:where([data-theme="sage"], [data-theme="ember"]) .flow-toolbar {
+  background: var(--panel);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-lane {
+  background: var(--canvas);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-lane > header {
+  color: var(--text);
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 11px;
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-card {
+  box-shadow: 0 1px 2px var(--shadow-color);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-card-title {
+  padding: 0;
+  border-radius: 2px;
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-card-status {
+  color: var(--lane-color);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-plan {
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .flow-change {
+  color: var(--success);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .state-running,
+:where([data-theme="sage"], [data-theme="ember"]) .header-branch.pr-merged {
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .state-waiting {
+  color: var(--info);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .segmented button.active {
+  background: var(--panel);
+  color: var(--accent);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-connection {
+  border: 1px solid var(--line);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-preview,
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-panel {
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .terminal-stage .terminal {
+  background: var(--canvas);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .toast {
+  background: var(--brand-fill);
+  color: var(--brand-foreground);
+  border-color: var(--danger-border);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .toast svg {
+  color: var(--brand-foreground);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .dialog {
+  background: var(--panel);
+  color: var(--text);
+}
+:where([data-theme="sage"], [data-theme="ember"]) .dialog::backdrop {
+  backdrop-filter: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  :where([data-theme="sage"], [data-theme="ember"])
+    .primary:hover:not(:disabled) {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .secondary:hover:not(:disabled) {
+    background: var(--hover);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .secondary.danger:hover:not(:disabled) {
+    background: var(--danger-bg);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .nav.active:hover:not(:disabled),
+  :where([data-theme="sage"], [data-theme="ember"])
+    .worktree-nav.active:hover:not(:disabled) {
+    background: var(--selected);
+    color: var(--text);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .settings-nav
+    button:hover:not(:disabled) {
+    background: var(--hover);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .settings-nav
+    button.active:hover:not(:disabled) {
+    background: var(--panel);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .flow-card:has(.flow-card-title:hover) {
+    border-color: var(--border-strong);
+  }
+  :where([data-theme="sage"], [data-theme="ember"]) .flow-plan:hover,
+  :where([data-theme="sage"], [data-theme="ember"]) .flow-change:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .repo-tree-heading
+    > button:hover:not(:disabled),
+  :where([data-theme="sage"], [data-theme="ember"]) .repo-menu summary:hover,
+  :where([data-theme="sage"], [data-theme="ember"])
+    .workspace-select
+    button:hover:not(:disabled),
+  :where([data-theme="sage"], [data-theme="ember"])
+    .terminal-tab-actions
+    button:hover:not(:disabled),
+  :where([data-theme="sage"], [data-theme="ember"])
+    .inspector-tabs
+    button:hover:not(:disabled),
+  :where([data-theme="sage"], [data-theme="ember"])
+    .session-tab-list
+    button:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .session-tab-list
+    button.active:hover:not(:disabled),
+  :where([data-theme="sage"], [data-theme="ember"])
+    .inspector-tabs
+    button.active:hover:not(:disabled),
+  :where([data-theme="sage"], [data-theme="ember"])
+    .terminal-tab-actions
+    button.active:hover:not(:disabled) {
+    background: var(--selected);
+    color: var(--accent);
+  }
+}
+/* Press feedback is local to actions, never whole rows, tabs or navigation. */
+@media (prefers-reduced-motion: no-preference) {
+  :where([data-theme="sage"], [data-theme="ember"]) .primary,
+  :where([data-theme="sage"], [data-theme="ember"]) .secondary,
+  :where([data-theme="sage"], [data-theme="ember"]) .icon-button {
+    transition: transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  :where([data-theme="sage"], [data-theme="ember"])
+    .primary:active:not(:disabled),
+  :where([data-theme="sage"], [data-theme="ember"])
+    .secondary:active:not(:disabled),
+  :where([data-theme="sage"], [data-theme="ember"])
+    .icon-button:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+  :where([data-theme="sage"], [data-theme="ember"]) button:focus-visible {
+    transition: none;
+    transform: none !important;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :where([data-theme="sage"], [data-theme="ember"]) .nav-backdrop {
+    backdrop-filter: none;
+    background: var(--canvas);
+  }
+}
+@media (prefers-contrast: more) {
+  :root:is([data-theme="sage"], [data-theme="ember"]) {
+    --line: var(--border-strong);
+    --muted: var(--text);
+  }
+}
+
+/* Neutralize the original ungated hover rules on touch devices. */
+@media (hover: none), (pointer: coarse) {
+  :where([data-theme="sage"], [data-theme="ember"]) .worktree-nav:hover,
+  :where([data-theme="sage"], [data-theme="ember"]) .repo-menu button:hover,
+  :where([data-theme="sage"], [data-theme="ember"]) .launch-dock button:hover {
+    background: transparent;
+    color: var(--text);
+  }
+  :where([data-theme="sage"], [data-theme="ember"]) .worktree-nav.active:hover {
+    background: var(--selected);
+  }
+}
